@@ -13,7 +13,7 @@ def run_yolo_on_images(
         max_det=300, use_half=False, classes_to_detect=None, device=None,
         batch_size=1, save_txt=False,
         save_conf=False, save_crop=False,
-        custom_annotated_images_output_dir=None, # MODIFIED: Default to None
+        custom_annotated_images_output_dir=None, 
         custom_line_width=None,
         custom_font_size=None):
 
@@ -24,7 +24,6 @@ def run_yolo_on_images(
     final_annotated_images_output_dir: str
     if custom_annotated_images_output_dir is None:
         # Default behavior: create a directory based on input_path name
-        # Normalize path to remove trailing slashes, then get base name
         base_name = os.path.basename(os.path.normpath(input_path))
         # Remove extension if present (e.g., for video files or single image processing)
         name_part, _ = os.path.splitext(base_name)
@@ -144,9 +143,8 @@ if __name__ == '__main__':
         device=None, # None for auto-detection (CPU or GPU)
         save_txt=False,
         save_conf=False,
-        save_crop=False,
-        # MODIFIED: custom_annotated_images_output_dir is removed from here to use the new default logic
-        # custom_annotated_images_output_dir="runs/detect/annotated_images", # This line is effectively removed
+        save_crop=False
+        
     )
 
     overall_duration = time.perf_counter() - overall_start_time

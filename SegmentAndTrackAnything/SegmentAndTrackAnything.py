@@ -36,7 +36,7 @@ def parse_arguments():
     parser.add_argument("--object_name_filter", type=str, default=None, help="Optional: Track only objects with this name from the JSON. If None, tracks all objects.")
     return parser.parse_args()
 
-def format_bbox_for_output_json(bbox_coords): # Renamed to reflect its for JSON, but format is general
+def format_bbox_for_output_json(bbox_coords): 
     xmin, ymin, xmax, ymax = bbox_coords[0][0], bbox_coords[0][1], bbox_coords[1][0], bbox_coords[1][1]
     return [
         {"x": float(xmin), "y": float(ymin)}, {"x": float(xmax), "y": float(ymin)},
@@ -56,7 +56,6 @@ def main():
         
     final_output_dir = os.path.join(args.base_output_dir, main_output_folder_name)
     output_annotated_image_dir = os.path.join(final_output_dir, "annotated_images")
-    # MODIFIED: Output tracking data as .txt file (still JSON Lines format internally)
     output_tracking_data_path = os.path.join(final_output_dir, f"{input_folder_name}_tracked_detections.txt")
 
     if not os.path.exists(final_output_dir): os.makedirs(final_output_dir, exist_ok=True)
@@ -182,7 +181,6 @@ def main():
     first_frame_proc_time = time.time() - first_frame_proc_start_time
     print(f"Initialized {seg_tracker.get_obj_num()} objects (first frame) in {first_frame_proc_time:.2f}s.")
 
-    # MODIFIED: Use output_tracking_data_path for the output file
     with open(output_tracking_data_path, 'w') as output_file:
         first_frame_json_output = {"fileName": first_image_filename_from_dir, "prelabels": first_frame_output_prelabels}
         output_file.write(json.dumps(first_frame_json_output) + '\n')
@@ -289,7 +287,7 @@ def main():
     overall_proc_time = time.time() - overall_start_time
     print(f"Total script execution time: {overall_proc_time:.2f} seconds")
     print(f"Annotated images saved to: {output_annotated_image_dir}")
-    print(f"Output tracking data saved to: {output_tracking_data_path}") # Updated variable name
+    print(f"Output tracking data saved to: {output_tracking_data_path}") 
     print("Script finished.")
 
 if __name__ == "__main__":

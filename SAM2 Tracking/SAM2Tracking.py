@@ -1,7 +1,3 @@
-# run_final_tracker_optimized.py
-# This is the final, fully optimized version. It adds vos_optimized=True for a major speedup.
-# MODIFIED to make the UUID persistent for each tracked object.
-
 import cv2
 import torch
 import os
@@ -11,7 +7,6 @@ import json
 import uuid
 from PIL import Image
 
-# Use the exact same imports as the successful examples
 from sam2.build_sam import build_sam2_video_predictor
 from sam2.utils import misc as sam2_misc
 
@@ -141,7 +136,6 @@ def main():
                 mask_bool = (frame_masks[obj_idx, 0].cpu().numpy() > args.mask_threshold)
                 if np.any(mask_bool):
                     print(f"  --> SUCCESS: Initialized object {i+1}.")
-                    # --- CHANGE 1: Generate UUID here and store it in the map ---
                     persistent_uid = str(uuid.uuid4())
                     script_id_map[predictor_obj_id] = {
                         "name": obj_data['name'], 
@@ -180,7 +174,7 @@ def main():
                             color = BBOX_COLORS_RGB[(obj_info["script_id_int"] - 1) % len(BBOX_COLORS_RGB)]
                             masks_for_current_frame.append({"mask": mask_bool_np, "color": color, "text": f"ID:{obj_info['script_id_int']}"})
                             bbox = sam2_misc.mask_to_box(torch.from_numpy(mask_bool_np).unsqueeze(0).unsqueeze(0))[0, 0].numpy().tolist()
-                            # --- CHANGE 2: Retrieve the persistent UUID from the map ---
+                            # Retrieve the persistent UUID from the map ---
                             frame_prelabels.append({
                                 "name": obj_info["name"], 
                                 "uid": obj_info["uid"], # Use the stored ID instead of generating a new one
