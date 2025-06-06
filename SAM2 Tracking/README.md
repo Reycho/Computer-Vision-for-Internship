@@ -1,24 +1,91 @@
 # SAM2 Multi-Object Video Tracker
 
-This project uses the SAM2 model to perform multi-object tracking on a sequence of video frames. It initializes objects on the first frame using bounding box prompts from a JSON file and tracks them through the entire sequence. The JSON file format is specific to requirements from my job.
+This project provides a command-line script to track multiple objects in an image sequence using the **Segment Anything 2 (SAM2)** model. It initializes objects on the first frame using bounding box prompts from a JSON file and leverages SAM2's built-in video tracking capabilities to propagate the masks through the entire sequence.
 
-## Final Result
+The script outputs a directory of annotated images (with both masks and bounding boxes), a JSON Lines file with frame-by-frame tracking data, and a final video compiling the results.
 
-The final tracking output has been compiled into the video below.
+## Demo of Results
 
-**[Click here to watch the tracking video](ExampleTrackedVideo.mp4)**
+The tracker successfully identifies and follows multiple objects throughout the video sequence.
 
+**Final Tracking Video Demo:**
+![Tracking Demo GIF](sample_output_demo/output.gif)
 
----
+## Setup & Installation
 
-## Technical Summary & Challenges
+**This project is highly sensitive to the environment configuration.** The following setup was determined through extensive testing and is required for successful execution on an NVIDIA GPU. The standard `pip install` of the `sam2` repository is insufficient as it can lead to silent build failures of the necessary C++ CUDA extensions.
 
-Successfully running this project required a highly specific and clean environment due to the model's sensitivity to library and toolkit versions.
+### Prerequisites
 
-**Key Requirements for Reproduction:**
+1.  **NVIDIA GPU** with a compatible driver.
+2.  **Conda** package manager.
+3.  **CUDA Toolkit version 12.4** installed on the system. This must match the PyTorch build and is required to correctly compile the SAM2 extensions.
 
-*   **PyTorch & CUDA Alignment:** The environment must use a PyTorch build compiled with the exact CUDA toolkit version installed on the system (in this case, `torch==2.5.1` for `cu124`).
-*   **Forced Extension Compilation:** The native SAM2 C++ CUDA extensions had to be force-compiled after installing the CUDA 12.4 toolkit. The default `pip install` resulted in a silent build failure, which caused numerical instability and tracking failure.
-*   **Correct Model Logic:** The `SAM2VideoPredictor` requires that all model interactions (from `init_state` through propagation) occur within a `torch.autocast` context and that pixel coordinate prompts are used with `normalize_coords=True`.
+### Installation Steps
 
+1.  **Clone the official SAM2 repository:**
+    ```bash
+    git clone https://github.com/facebookresearch/sam2.git
+    cd sam2
+    ```
 
+2.  **Create and activate a clean Conda environment:**
+    ```bash
+    conda create -n sam2_env python=3.11 -y
+    conda activate sam2_env
+    ```
+
+3.  **Install the specific PyTorch build for CUDA 12.4:**
+    ```bash
+    pip3 install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+    ```
+
+4.  **Force-compile the SAM2 extensions:** This is the most critical step. It ensures the C++ CUDA code is built correctly against your environment.
+    ```bash
+    pip uninstall -y sam2
+    rm -f ./sam2/_C*.so
+    SAM2_BUILD_ALLOW_ERRORS=0 pip install -v -e .
+    ```
+
+5.  **Install remaining dependencies:**
+    ```bash
+    pip install opencv-python matplotlib
+    ```
+
+## Usage
+
+Place the final script (`run_final_tracker_optimized.py`) in the root of the cloned `sam2` repository. Ensure your data is also accessible from this location.
+
+Run the script from your terminal:
+
+```bash
+python run_final_tracker_optimized.py \
+    --image_dir path/to/your/image_sequence \
+    --json_annotation path/to/your/annotation.json \
+    --model_config_yaml "configs/sam2.1/sam2.1_hiera_l.yaml" \
+    --local_checkpoint_path path/to/your/sam2.1_hiera_large.pt \
+    --make_video
+```
+
+### Command-Line Arguments
+
+-   `--image_dir`: (Required) Path to the input image sequence folder.
+-   `--json_annotation`: (Required) Path to the JSON annotation file for the first frame.
+-   `--model_config_yaml`: (Required) Path to the model's YAML configuration file.
+-   `--local_checkpoint_path`: (Required) Path to the local `.pt` model checkpoint file.
+-   `--output_dir`: Directory to save all outputs. (Default: `sam2_final_optimized_output`)
+-   `--mask_threshold`: Threshold for binarizing mask logits. (Default: `0.0`)
+-   `--make_video`: A flag to enable final video creation from annotated frames.
+-   `--video_fps`: Framerate for the output video. (Default: `10.0`)
+
+## Input & Output
+
+-   **Input JSON:** A single JSON object describing objects in the first frame, similar to LabelMe or Pascal VOC format. It must contain an `object` list with `bndbox` dictionaries (`xmin`, `ymin`, `xmax`, `ymax`).
+-   **Output Data File (`tracked_detections.jsonl`):** A JSON Lines file where each line is a JSON object containing the tracking results for one frame. Each object includes a `name`, a unique `uid`, and the rectangular `points` of its bounding box.
+-   **Visual Output:**
+    -   A folder of annotated frames with semi-transparent masks and bounding boxes drawn for each tracked object.
+    -   A final `tracking_video.mp4` compiling these frames.
+
+## Acknowledgements
+
+This work is built upon the official [SAM 2](https://github.com/facebookresearch/sam2) repository and its powerful video segmentation model. The successful implementation was the result of a rigorous debugging process to resolve specific environment and compilation challenges.
