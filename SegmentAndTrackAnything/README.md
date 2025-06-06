@@ -4,6 +4,10 @@ This project provides a command-line script to track multiple objects in an imag
 
 The script outputs a directory of annotated images and a JSON Lines file with frame-by-frame tracking data.
 
+# Demo
+![Tracking Demo GIF](output.gif)
+
+
 ## Setup
 
 Follow original Repo install guide: [Segment-and-Track-Anything](https://github.com/z-x-yang/Segment-and-Track-Anything)

@@ -9,7 +9,7 @@ The script outputs a directory of annotated images (with both masks and bounding
 The tracker successfully identifies and follows multiple objects throughout the video sequence.
 
 **Final Tracking Video Demo:**
-![Tracking Demo GIF](sample_output_demo/output.gif)
+![Tracking Demo GIF](output.gif)
 
 ## Setup & Installation
 
