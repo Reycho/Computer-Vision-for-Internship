@@ -64,6 +64,21 @@ def create_video_from_frames(image_folder, video_path, fps):
     video.release()
     print(f"--> Video saved successfully to {video_path}")
 
+def save_frame_output(image_path, masks_to_draw, frame_prelabels, annotated_dir, jsonl_path, write_mode='a'):
+    """
+    Handles all output for a single frame: saving the visualized image and appending to the JSONL data file.
+    """
+    # Create and save the annotated frame
+    original_frame_np = np.array(Image.open(image_path).convert("RGB"))
+    annotated_frame = draw_visualizations(original_frame_np, masks_to_draw)
+    cv2.imwrite(os.path.join(annotated_dir, os.path.basename(image_path)), cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
+    
+    # Save the detection data
+    if frame_prelabels:
+        with open(jsonl_path, write_mode) as f_out:
+            f_out.write(json.dumps({"fileName": os.path.basename(image_path), "prelabels": frame_prelabels}) + '\n')
+
+
 def initialize_tracks(predictor, inference_state, objects_initial, mask_threshold):
     """
     Initializes tracks on the first frame using bounding box prompts.
@@ -121,7 +136,6 @@ def propagate_tracks(predictor, inference_state, image_files, script_id_map, arg
     for frame_idx, pred_obj_ids, frame_masks_all in predictor.propagate_in_video(inference_state, start_frame_idx=1):
         print(f"  Processing frame: {os.path.basename(image_files[frame_idx])}", end='\r')
         current_img_path = image_files[frame_idx]
-        original_frame_np = np.array(Image.open(current_img_path).convert("RGB"))
         frame_prelabels, masks_for_current_frame = [], []
 
         if pred_obj_ids:
@@ -139,11 +153,8 @@ def propagate_tracks(predictor, inference_state, image_files, script_id_map, arg
                             "points": [{"x": float(p[0]), "y": float(p[1])} for p in [[bbox[0],bbox[1]],[bbox[2],bbox[1]],[bbox[2],bbox[3]],[bbox[0],bbox[3]]]]
                         })
         
-        annotated_frame = draw_visualizations(original_frame_np, masks_for_current_frame)
-        cv2.imwrite(os.path.join(annotated_dir, os.path.basename(current_img_path)), cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
-        if frame_prelabels:
-            with open(jsonl_path, 'a') as f_out:
-                f_out.write(json.dumps({"fileName": os.path.basename(current_img_path), "prelabels": frame_prelabels}) + '\n')
+        save_frame_output(current_img_path, masks_for_current_frame, frame_prelabels, annotated_dir, jsonl_path, write_mode='a')
+
     print("\nTracking complete.                           ")
 
 def main():
@@ -177,7 +188,6 @@ def main():
     )
     predictor.eval()
 
-    # The autocast context wraps all model interactions, which is critical.
     with autocast_context:
         image_files = get_sorted_image_files(args.image_dir)
         print("Initializing inference state (first run may be slow due to compilation)...")
@@ -192,11 +202,14 @@ def main():
         )
 
         # --- Step 2: Save the output for the first frame ---
-        original_first_frame_np = np.array(Image.open(image_files[0]).convert("RGB"))
-        annotated_frame_0 = draw_visualizations(original_first_frame_np, masks_for_frame_0)
-        cv2.imwrite(os.path.join(annotated_dir, os.path.basename(image_files[0])), cv2.cvtColor(annotated_frame_0, cv2.COLOR_RGB2BGR))
-        with open(jsonl_path, 'w') as f_out:
-            f_out.write(json.dumps({"fileName": os.path.basename(image_files[0]), "prelabels": frame_0_prelabels}) + '\n')
+        save_frame_output(
+            image_path=image_files[0],
+            masks_to_draw=masks_for_frame_0,
+            frame_prelabels=frame_0_prelabels,
+            annotated_dir=annotated_dir,
+            jsonl_path=jsonl_path,
+            write_mode='w'  # Use 'w' to create/overwrite the file for the first frame
+        )
 
         # --- Step 3: Propagate tracks if any were initialized ---
         if script_id_map:
@@ -205,7 +218,6 @@ def main():
             print("\nNo objects were initialized successfully. Exiting.")
             return
 
-    # --- Step 4: Create the final video if requested ---
     if args.make_video:
         create_video_from_frames(annotated_dir, os.path.join(args.output_dir, "tracking_video.mp4"), args.video_fps)
 
