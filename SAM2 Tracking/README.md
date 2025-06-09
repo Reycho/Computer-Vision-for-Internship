@@ -11,15 +11,6 @@ The tracker successfully identifies and follows multiple objects throughout the 
 **Final Tracking Video Demo:**
 ![Tracking Demo GIF](output.gif)
 
-## Setup & Installation
-
-**This project is highly sensitive to the environment configuration.** The following setup was determined through extensive testing and is required for successful execution on an NVIDIA GPU. The standard `pip install` of the `sam2` repository is insufficient as it can lead to silent build failures of the necessary C++ CUDA extensions.
-
-### Prerequisites
-
-1.  **NVIDIA GPU** with a compatible driver.
-2.  **Conda** package manager.
-3.  **CUDA Toolkit version 12.4** installed on the system. This must match the PyTorch build and is required to correctly compile the SAM2 extensions.
 
 ### Installation Steps
 
@@ -88,4 +79,4 @@ python run_final_tracker_optimized.py \
 
 ## Acknowledgements
 
-This work is built upon the official [SAM 2](https://github.com/facebookresearch/sam2) repository and its powerful video segmentation model. The successful implementation was the result of a rigorous debugging process to resolve specific environment and compilation challenges.
+This work is built upon the official [SAM 2](https://github.com/facebookresearch/sam2) repository and its powerful video segmentation model.
