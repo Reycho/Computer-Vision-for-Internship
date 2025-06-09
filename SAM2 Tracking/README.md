@@ -45,12 +45,12 @@ The tracker successfully identifies and follows multiple objects throughout the 
 
 ## Usage
 
-Place the final script (`run_final_tracker_optimized.py`) in the root of the cloned `sam2` repository. Ensure your data is also accessible from this location.
+Place the final script (`SAM2Tracking.py`) in the root of the cloned `sam2` repository. Ensure your data is also accessible from this location.
 
 Run the script from your terminal:
 
 ```bash
-python run_final_tracker_optimized.py \
+python SAM2Tracking.py \
     --image_dir path/to/your/image_sequence \
     --json_annotation path/to/your/annotation.json \
     --model_config_yaml "configs/sam2.1/sam2.1_hiera_l.yaml" \
