@@ -16,10 +16,6 @@ The tracker successfully identifies and follows multiple objects throughout the 
 
 1.  **Follow installation steps according to the sam2 repo.**
     https://github.com/facebookresearch/sam2
-    ```bash
-    git clone https://github.com/facebookresearch/sam2.git
-    cd sam2
-    ```
 
 2.  **If you encounter an error related to CUDA compilation.** 
 
