@@ -1,18 +1,11 @@
-# Advanced YOLO12 Inference Pipeline
+# Yolo12 Based Detector
 
-This repository contains a powerful and highly customizable Python script for running object detection using the Ultralytics YOLOv8 framework. It is designed to process batches of images, save detailed detection results in a specific JSON-line format, and generate annotated images for visual inspection.
+A simple script utilising ultralytics frameowrk to detect and export detected data.
 
-The script is built to be flexible, allowing for fine-tuning of nearly every aspect of the inference process, from model selection and image size to performance optimizations like half-precision and Test-Time Augmentation (TTA).
+The script is flexible with options ranging from model selection and image size to performance optimizations like half-precision and Test-Time Augmentation (TTA).
 
 # Demo
 ![Example Output](20250401104225.046401_RearCam01.jpeg)
-
-## Features
-
--   **Flexible Model Support:** Use any official Ultralytics YOLO model (e.g., `yolov12s.pt`, `yolov12x.pt`) or your own custom-trained models.
--   **Custom Detection Output:** Generates a `.txt` file with one JSON object per image, containing detailed bounding box coordinates and class information.
--   **Visual Annotation:** Automatically saves copies of the input images with detection bounding boxes, class names, and confidence scores drawn on them.
--   **Customizable Annotations:** Control the line width and font size of the saved bounding box annotations.
 
 ## Requirements
 
