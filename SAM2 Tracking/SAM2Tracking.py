@@ -1,6 +1,3 @@
-# sam2_video_tracker_parallel.py
-# Final version with parallelized output generation for maximum speed.
-
 import cv2
 import torch
 import os
@@ -218,3 +215,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# Example command
+#python SAM2Tracking.py     --image_dir ./inputs/FrontCam02     --json_annotation ./inputsjson/FrontCam02.json     --model_config_yaml "configs/sam2.1/sam2.1_hiera_l.yaml"     --local_checkpoint_path ./checkpoints/sam2.1_hiera_large.pt     --make_video
