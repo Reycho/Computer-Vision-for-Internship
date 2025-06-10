@@ -14,31 +14,32 @@ The tracker successfully identifies and follows multiple objects throughout the 
 
 ### Installation Steps
 
-1.  **Clone the official SAM2 repository:**
+1.  **Setup your enviroment according to the sam2 repo installation steps.**
     ```bash
     git clone https://github.com/facebookresearch/sam2.git
     cd sam2
     ```
 
-2.  **Create and activate a clean Conda environment:**
-    ```bash
-    conda create -n sam2_env python=3.11 -y
-    conda activate sam2_env
-    ```
+2. **Download checkpoints from the sam2 repo.**
+   ```
+    cd checkpoints && \
+    ./download_ckpts.sh && \
+    cd ..
+   ```
 
-3.  **Install the specific PyTorch build for CUDA 12.4:**
-    ```bash
-    pip3 install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-    ```
+3.
 
-4.  **Force-compile the SAM2 extensions:** This is the most critical step. It ensures the C++ CUDA code is built correctly against your environment.
+4.  ** If you encounter an error related to CUDA compilation.** 
+
+    You can force-compile the SAM2 extensions as long as you have the right nvidia toolkit installed.
+    More information here: https://github.com/facebookresearch/sam2/blob/main/INSTALL.md
     ```bash
     pip uninstall -y sam2
     rm -f ./sam2/_C*.so
     SAM2_BUILD_ALLOW_ERRORS=0 pip install -v -e .
     ```
 
-5.  **Install remaining dependencies:**
+6.  **Install remaining dependencies:**
     ```bash
     pip install opencv-python matplotlib
     ```
