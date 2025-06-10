@@ -27,9 +27,7 @@ The tracker successfully identifies and follows multiple objects throughout the 
     cd ..
    ```
 
-3.
-
-4.  ** If you encounter an error related to CUDA compilation.** 
+3.  ** If you encounter an error related to CUDA compilation.** 
 
     You can force-compile the SAM2 extensions as long as you have the right nvidia toolkit installed.
     More information here: https://github.com/facebookresearch/sam2/blob/main/INSTALL.md
@@ -39,7 +37,7 @@ The tracker successfully identifies and follows multiple objects throughout the 
     SAM2_BUILD_ALLOW_ERRORS=0 pip install -v -e .
     ```
 
-6.  **Install remaining dependencies:**
+4.  **Install remaining dependencies:**
     ```bash
     pip install opencv-python matplotlib
     ```
