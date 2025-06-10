@@ -15,19 +15,20 @@ The tracker successfully identifies and follows multiple objects throughout the 
 ### Installation Steps
 
 1.  **Setup your enviroment according to the sam2 repo installation steps.**
+    https://github.com/facebookresearch/sam2
     ```bash
     git clone https://github.com/facebookresearch/sam2.git
     cd sam2
     ```
 
-2. **Download checkpoints from the sam2 repo.**
+3. **Download checkpoints from the sam2 repo.**
    ```
     cd checkpoints && \
     ./download_ckpts.sh && \
     cd ..
    ```
 
-3.  ** If you encounter an error related to CUDA compilation.** 
+4.  ** If you encounter an error related to CUDA compilation.** 
 
     You can force-compile the SAM2 extensions as long as you have the right nvidia toolkit installed.
     More information here: https://github.com/facebookresearch/sam2/blob/main/INSTALL.md
@@ -37,7 +38,7 @@ The tracker successfully identifies and follows multiple objects throughout the 
     SAM2_BUILD_ALLOW_ERRORS=0 pip install -v -e .
     ```
 
-4.  **Install remaining dependencies:**
+5.  **Install remaining dependencies:**
     ```bash
     pip install opencv-python matplotlib
     ```
