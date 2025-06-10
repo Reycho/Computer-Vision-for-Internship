@@ -11,55 +11,30 @@ The tracker successfully identifies and follows multiple objects throughout the 
 **Final Tracking Video Demo:**
 ![Tracking Demo GIF](output.gif)
 
-## Setup & Installation
-
-**This project is highly sensitive to the environment configuration.** The following setup was determined through extensive testing and is required for successful execution on an NVIDIA GPU. The standard `pip install` of the `sam2` repository is insufficient as it can lead to silent build failures of the necessary C++ CUDA extensions.
-
-### Prerequisites
-
-1.  **NVIDIA GPU** with a compatible driver.
-2.  **Conda** package manager.
-3.  **CUDA Toolkit version 12.4** installed on the system. This must match the PyTorch build and is required to correctly compile the SAM2 extensions.
 
 ### Installation Steps
 
-1.  **Clone the official SAM2 repository:**
-    ```bash
-    git clone https://github.com/facebookresearch/sam2.git
-    cd sam2
-    ```
+1.  **Follow installation steps according to the sam2 repo.**
+    https://github.com/facebookresearch/sam2
 
-2.  **Create and activate a clean Conda environment:**
-    ```bash
-    conda create -n sam2_env python=3.11 -y
-    conda activate sam2_env
-    ```
+2.  **If you encounter an error related to CUDA compilation.** 
 
-3.  **Install the specific PyTorch build for CUDA 12.4:**
-    ```bash
-    pip3 install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
-    ```
+    You can force-compile the SAM2 extensions as long as you have the right nvidia toolkit installed.
+    More information here: https://github.com/facebookresearch/sam2/blob/main/INSTALL.md
 
-4.  **Force-compile the SAM2 extensions:** This is the most critical step. It ensures the C++ CUDA code is built correctly against your environment.
-    ```bash
-    pip uninstall -y sam2
-    rm -f ./sam2/_C*.so
-    SAM2_BUILD_ALLOW_ERRORS=0 pip install -v -e .
-    ```
-
-5.  **Install remaining dependencies:**
+3.  **Install remaining dependencies:**
     ```bash
     pip install opencv-python matplotlib
     ```
 
 ## Usage
 
-Place the final script (`run_final_tracker_optimized.py`) in the root of the cloned `sam2` repository. Ensure your data is also accessible from this location.
+Place the final script (`SAM2Tracking.py`) in the root of the cloned `sam2` repository. Ensure your data is also accessible from this location.
 
 Run the script from your terminal:
 
 ```bash
-python run_final_tracker_optimized.py \
+python SAM2Tracking.py \
     --image_dir path/to/your/image_sequence \
     --json_annotation path/to/your/annotation.json \
     --model_config_yaml "configs/sam2.1/sam2.1_hiera_l.yaml" \
@@ -88,4 +63,4 @@ python run_final_tracker_optimized.py \
 
 ## Acknowledgements
 
-This work is built upon the official [SAM 2](https://github.com/facebookresearch/sam2) repository and its powerful video segmentation model. The successful implementation was the result of a rigorous debugging process to resolve specific environment and compilation challenges.
+This work is built upon the official [SAM 2](https://github.com/facebookresearch/sam2) repository and its powerful video segmentation model.

@@ -10,19 +10,9 @@ The script is built to be flexible, allowing for fine-tuning of nearly every asp
 ## Features
 
 -   **Flexible Model Support:** Use any official Ultralytics YOLO model (e.g., `yolov12s.pt`, `yolov12x.pt`) or your own custom-trained models.
--   **Batch Processing:** Efficiently process entire directories of images.
 -   **Custom Detection Output:** Generates a `.txt` file with one JSON object per image, containing detailed bounding box coordinates and class information.
 -   **Visual Annotation:** Automatically saves copies of the input images with detection bounding boxes, class names, and confidence scores drawn on them.
--   **Highly Configurable Inference:**
-    -   Custom input image size (`img_size`).
-    -   Confidence (`conf_thresh`) and IoU (`iou_thresh`) thresholds.
-    -   Device selection (`device`): CPU, CUDA GPU, or Apple MPS.
-    -   Adjustable `batch_size` for optimal GPU memory usage.
-    -   Enable/disable Test-Time Augmentation (`use_tta`) for an accuracy boost.
-    -   Enable/disable half-precision (FP16) inference (`use_half`) for a significant speedup on compatible GPUs.
-    -   Filter detections by specific class IDs (`classes_to_detect`).
 -   **Customizable Annotations:** Control the line width and font size of the saved bounding box annotations.
--   **Performance Tracking:** Reports total processing time and average Frames Per Second (FPS).
 
 ## Requirements
 

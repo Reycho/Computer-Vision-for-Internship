@@ -8,6 +8,9 @@ The script outputs a directory of annotated images and a JSON Lines file with fr
 ![Tracking Demo GIF](output.gif)
 
 
+## Note
+Please use SAM2 Tracking as it is simply more accurate.
+
 ## Setup
 
 Follow original Repo install guide: [Segment-and-Track-Anything](https://github.com/z-x-yang/Segment-and-Track-Anything)
