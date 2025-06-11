@@ -10,9 +10,9 @@ from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 
 from sam2.build_sam import build_sam2_video_predictor
-from sam2.utils import misc as sam2_misc
+from sam2.utils import amg 
 
-# --- Helper Functions (Proven Correct) ---
+# --- Helper Functions ---
 BBOX_COLORS_RGB = [
     (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255),
     (255, 0, 255), (128, 0, 0), (0, 128, 0), (0, 0, 128), (128, 128, 0)
@@ -28,17 +28,14 @@ def get_sorted_image_files(image_dir_path):
 def draw_visualizations(image_np, masks_to_draw, alpha=0.5):
     output_image = image_np.copy()
     for mask_info in masks_to_draw:
-        mask_bool, color, text = mask_info["mask"], mask_info["color"], mask_info["text"]
+        mask_bool, color, text, box = mask_info["mask"], mask_info["color"], mask_info["text"], mask_info["box"]
         overlay = np.zeros_like(output_image, dtype=np.uint8)
         overlay[mask_bool] = color
         output_image = cv2.addWeighted(output_image, 1.0, overlay, alpha, 0)
-        rows, cols = np.where(mask_bool)
-        if len(rows) > 0:
-            xmin, xmax = cols.min(), cols.max()
-            ymin, ymax = rows.min(), rows.max()
-            cv2.rectangle(output_image, (xmin, ymin), (xmax, ymax), color, 2)
-            if text:
-                cv2.putText(output_image, text, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+        xmin, ymin, xmax, ymax = box[0], box[1], box[2], box[3]
+        cv2.rectangle(output_image, (xmin, ymin), (xmax, ymax), color, 2)
+        if text:
+            cv2.putText(output_image, text, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
     return output_image
 
 def create_video_from_frames(image_folder, video_path, fps):
@@ -62,7 +59,6 @@ def initialize_tracks(predictor, inference_state, objects_initial, mask_threshol
     print("\n--- Initializing objects on Frame 0 with Bounding Box Prompts ---")
     script_id_map, masks_for_frame_0, frame_0_prelabels = {}, [], []
     for i, obj_data in enumerate(objects_initial):
-        # ... This function's internal logic is identical ...
         predictor_obj_id = str(i + 1)
         bndbox = obj_data["bndbox"]
         xmin, ymin, xmax, ymax = int(bndbox["xmin"]), int(bndbox["ymin"]), int(bndbox["xmax"]), int(bndbox["ymax"])
@@ -73,55 +69,106 @@ def initialize_tracks(predictor, inference_state, objects_initial, mask_threshol
         )
         if returned_obj_ids and predictor_obj_id in returned_obj_ids:
             obj_idx = returned_obj_ids.index(predictor_obj_id)
-            mask_bool = (frame_masks[obj_idx, 0].cpu().numpy() > mask_threshold)
-            if np.any(mask_bool):
+            mask_tensor_gpu = frame_masks[obj_idx, 0] # Mask is on GPU
+            mask_bool_gpu = mask_tensor_gpu > mask_threshold
+
+            if torch.any(mask_bool_gpu):
                 print(f"  --> SUCCESS: Initialized object {i+1}.")
                 persistent_uid = str(uuid.uuid4())
                 script_id_map[predictor_obj_id] = {"name": obj_data['name'], "script_id_int": i + 1, "uid": persistent_uid}
                 color = BBOX_COLORS_RGB[i % len(BBOX_COLORS_RGB)]
-                masks_for_frame_0.append({"mask": mask_bool, "color": color, "text": f"ID:{i+1}"})
-                bbox = sam2_misc.mask_to_box(torch.from_numpy(mask_bool).unsqueeze(0).unsqueeze(0))[0, 0].numpy().tolist()
-                frame_0_prelabels.append({"name": obj_data['name'], "uid": persistent_uid, "type": "rect", "points": [{"x": float(p[0]), "y": float(p[1])} for p in [[bbox[0],bbox[1]],[bbox[2],bbox[1]],[bbox[2],bbox[3]],[bbox[0],bbox[3]]]]})
+                
+                # Use batched_mask_to_box for consistency, even for a single mask
+                bbox_gpu = amg.batched_mask_to_box(mask_bool_gpu.unsqueeze(0))
+                bbox_cpu = bbox_gpu[0].cpu().numpy().astype(int)
+                
+                masks_for_frame_0.append({
+                    "mask": mask_bool_gpu.cpu().numpy(), 
+                    "color": color, 
+                    "text": f"ID:{i+1}",
+                    "box": bbox_cpu
+                })
+                
+                frame_0_prelabels.append({
+                    "name": obj_data['name'], "uid": persistent_uid, "type": "rect", 
+                    "points": [{"x": float(p[0]), "y": float(p[1])} for p in [[bbox_cpu[0],bbox_cpu[1]],[bbox_cpu[2],bbox_cpu[1]],[bbox_cpu[2],bbox_cpu[3]],[bbox_cpu[0],bbox_cpu[3]]]]
+                })
     return script_id_map, masks_for_frame_0, frame_0_prelabels
 
 
 def propagate_and_collect_results(predictor, inference_state, image_files, script_id_map, args):
-    """PHASE 1: GPU-INTENSIVE - Propagates tracks and collects all results in memory."""
+    """
+    OPTIMIZED: Propagates tracks and collects results.
+    - All mask thresholding and bbox calculations are done on the GPU.
+    - Data is transferred to CPU only once per frame after all objects are processed.
+    """
     print(f"\nInitialized {len(script_id_map)} objects. Starting propagation (inference only)...")
     all_frame_results = {}
-    # The predictor's internal loop will print a clean tqdm progress bar for the GPU work.
+    
     for frame_idx, pred_obj_ids, frame_masks_all in predictor.propagate_in_video(inference_state, start_frame_idx=1):
-        frame_results = {"visuals": [], "prelabels": []}
+        
+        # --- Step 1: Collect valid masks and object info on the GPU ---
+        valid_masks_gpu = []
+        valid_obj_info = []
         if pred_obj_ids:
             for i, pred_id in enumerate(pred_obj_ids):
                 if pred_id in script_id_map:
-                    obj_info = script_id_map[pred_id]
-                    mask_bool_np = (frame_masks_all[i, 0].cpu().numpy() > args.mask_threshold)
-                    if np.any(mask_bool_np):
-                        color = BBOX_COLORS_RGB[(obj_info["script_id_int"] - 1) % len(BBOX_COLORS_RGB)]
-                        frame_results["visuals"].append({"mask": mask_bool_np, "color": color, "text": f"ID:{obj_info['script_id_int']}"})
-                        bbox = sam2_misc.mask_to_box(torch.from_numpy(mask_bool_np).unsqueeze(0).unsqueeze(0))[0, 0].numpy().tolist()
-                        frame_results["prelabels"].append({
-                            "name": obj_info["name"], "uid": obj_info["uid"], "type": "rect",
-                            "points": [{"x": float(p[0]), "y": float(p[1])} for p in [[bbox[0],bbox[1]],[bbox[2],bbox[1]],[bbox[2],bbox[3]],[bbox[0],bbox[3]]]]
-                        })
+                    # Keep tensors on GPU
+                    mask_tensor_gpu = frame_masks_all[i, 0]
+                    mask_bool_gpu = mask_tensor_gpu > args.mask_threshold
+                    
+                    # Check for non-empty mask on GPU
+                    if torch.any(mask_bool_gpu):
+                        valid_masks_gpu.append(mask_bool_gpu.unsqueeze(0)) # Add batch dim
+                        valid_obj_info.append(script_id_map[pred_id])
+
+        # --- Step 2: Perform batched calculations on the GPU if any objects were found ---
+        if not valid_masks_gpu:
+            all_frame_results[frame_idx] = {"visuals": [], "prelabels": []}
+            continue
+
+        batched_masks_gpu = torch.cat(valid_masks_gpu, dim=0)
+        batched_boxes_gpu = amg.batched_mask_to_box(batched_masks_gpu)
+
+        # --- Step 3: Transfer final, small results to CPU in a single operation ---
+        batched_masks_cpu = batched_masks_gpu.cpu().numpy()
+        batched_boxes_cpu = batched_boxes_gpu.cpu().numpy().astype(int)
+
+        # --- Step 4: Format results on the CPU ---
+        frame_results = {"visuals": [], "prelabels": []}
+        for i, obj_info in enumerate(valid_obj_info):
+            mask_np = batched_masks_cpu[i]
+            box_coords = batched_boxes_cpu[i]
+            color = BBOX_COLORS_RGB[(obj_info["script_id_int"] - 1) % len(BBOX_COLORS_RGB)]
+
+            frame_results["visuals"].append({
+                "mask": mask_np,
+                "color": color,
+                "text": f"ID:{obj_info['script_id_int']}",
+                "box": box_coords
+            })
+
+            frame_results["prelabels"].append({
+                "name": obj_info["name"], "uid": obj_info["uid"], "type": "rect",
+                "points": [{"x": float(p[0]), "y": float(p[1])} for p in [[box_coords[0],box_coords[1]],[box_coords[2],box_coords[1]],[box_coords[2],box_coords[3]],[box_coords[0],box_coords[3]]]]
+            })
+        
         all_frame_results[frame_idx] = frame_results
+        
     print("\nInference complete.")
     return all_frame_results
 
-# --- NEW WORKER FUNCTION ---
-# This function must be at the top level of the script so it can be "pickled" and sent to other processes.
 def save_output_worker(args_tuple):
     """A single worker's job: save the output for one frame."""
     frame_idx, results, image_files, args = args_tuple
     
     current_img_path = image_files[frame_idx]
     annotated_dir = os.path.join(args.output_dir, "annotated_frames")
-    jsonl_path = os.path.join(args.output_dir, "tracked_detections.jsonl")
-
+    
     # Save visualization
     original_frame_np = np.array(Image.open(current_img_path).convert("RGB"))
     annotated_frame = draw_visualizations(original_frame_np, results["visuals"])
+    # Convert RGB (from PIL) to BGR (for OpenCV)
     cv2.imwrite(os.path.join(annotated_dir, os.path.basename(current_img_path)), cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
     
     # Return the data to be written to the main JSONL file
@@ -133,29 +180,29 @@ def save_all_outputs_parallel(all_frame_results, image_files, args):
     """PHASE 2: CPU/IO-INTENSIVE (Parallelized) - Saves all collected results to disk using multiple processes."""
     print("\n--- Saving all outputs in parallel across CPU cores ---")
     
+    annotated_dir = os.path.join(args.output_dir, "annotated_frames")
+    jsonl_path = os.path.join(args.output_dir, "tracked_detections.jsonl")
+
+    # Clear previous results if they exist to avoid mixing old and new data
+    if os.path.exists(jsonl_path):
+        os.remove(jsonl_path)
+    
     # Prepare the list of jobs for the worker pool
     tasks = [(frame_idx, results, image_files, args) for frame_idx, results in all_frame_results.items()]
     
-    jsonl_lines = []
     # Use ProcessPoolExecutor to manage a pool of worker processes
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor() as executor, open(jsonl_path, 'a') as f_out:
         # executor.map distributes the tasks to the workers. tqdm tracks the progress.
         # The result from each worker (the JSONL string) is collected as it completes.
         for result in tqdm(executor.map(save_output_worker, tasks), total=len(tasks), desc="Saving outputs"):
             if result:
-                jsonl_lines.append(result + '\n')
-
-    # Write all the JSONL lines to the file at once
-    jsonl_path = os.path.join(args.output_dir, "tracked_detections.jsonl")
-    with open(jsonl_path, 'w') as f_out: # 'w' to overwrite with all data
-        f_out.writelines(jsonl_lines)
+                f_out.write(result + '\n')
 
     print("All outputs saved.")
 
 
 def main():
     parser = argparse.ArgumentParser(description="SAM2 Video Tracker (Parallelized Output Version)")
-    # ... (args parsing is identical) ...
     parser.add_argument("--image_dir", type=str, required=True)
     parser.add_argument("--json_annotation", type=str, required=True)
     parser.add_argument("--model_config_yaml", type=str, required=True)
@@ -166,14 +213,17 @@ def main():
     parser.add_argument("--video_fps", type=float, default=10.0)
     args = parser.parse_args()
 
-    # ... (setup is identical) ...
     annotated_dir = os.path.join(args.output_dir, "annotated_frames")
     os.makedirs(annotated_dir, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    autocast_context = torch.autocast("cuda", dtype=torch.bfloat16)
-    if torch.cuda.get_device_properties(0).major >= 8:
-        print("Enabling TF32 for Ampere GPUs.")
+    
+    # Check for bfloat16 support and device properties
+    use_bfloat16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    autocast_context = torch.autocast("cuda", dtype=torch.bfloat16) if use_bfloat16 else torch.autocast("cuda")
+    
+    if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8:
+        print("Enabling TF32 for Ampere and newer GPUs.")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
@@ -193,7 +243,10 @@ def main():
         script_id_map, masks_for_frame_0, frame_0_prelabels = initialize_tracks(
             predictor, inference_state, objects_initial, args.mask_threshold
         )
-        all_tracked_results[0] = {"visuals": masks_for_frame_0, "prelabels": frame_0_prelabels}
+        
+        # Manually add frame 0 results, as propagate_and_collect doesn't process it.
+        if masks_for_frame_0:
+            all_tracked_results[0] = {"visuals": masks_for_frame_0, "prelabels": frame_0_prelabels}
         
         if script_id_map:
             other_frames_results = propagate_and_collect_results(
@@ -215,6 +268,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# Example command
-#python SAM2Tracking.py     --image_dir ./inputs/FrontCam02     --json_annotation ./inputsjson/FrontCam02.json     --model_config_yaml "configs/sam2.1/sam2.1_hiera_l.yaml"     --local_checkpoint_path ./checkpoints/sam2.1_hiera_large.pt     --make_video
