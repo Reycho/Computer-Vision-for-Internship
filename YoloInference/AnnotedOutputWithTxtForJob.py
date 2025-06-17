@@ -1,151 +1,201 @@
-import ultralytics
-import time
+import os
 import json
 import uuid
-import os
+import time
+import ultralytics
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from tqdm import tqdm
 import cv2
 
-def run_yolo_on_images(
-        input_path,
-        model_path_or_name="yolo12x.pt",
-        output_txt_path="runs/detections_output.txt",
-        conf_thresh=0.25, iou_thresh=0.7, img_size=640, use_tta=False,
-        max_det=300, use_half=False, classes_to_detect=None, device=None,
-        batch_size=1, save_txt=False,
-        save_conf=False, save_crop=False,
-        custom_annotated_images_output_dir=None, 
-        custom_line_width=None,
-        custom_font_size=None):
 
-    model = ultralytics.YOLO(model_path_or_name)
-    print(f"Loaded YOLO model: {model_path_or_name}")
+def format_data_for_jsonl(payload):
+    """
+    Handles CPU-bound tasks. Receives a simple dictionary ('payload')
+    containing only basic data types. (This function is unchanged).
+    """
+    img_h = payload['img_h']
+    img_w = payload['img_w']
+    
+    prelabels_list = []
+    for box_data in payload['boxes']:
+        xmin, ymin, xmax, ymax = box_data['coords']
+                
+        prelabel_entry = {
+            "name": box_data['name'],
+            "confidence": box_data['confidence'],
+            "detection_uid": str(uuid.uuid4()),
+            "type": "rect",
+            "points": [
+                {"x": xmin, "y": ymin}, {"x": xmax, "y": ymin},
+                {"x": xmax, "y": ymax}, {"x": xmin, "y": ymax}
+            ]
+        }
+        prelabels_list.append(prelabel_entry)
 
-    # Determine the output directory for annotated images
-    final_annotated_images_output_dir: str
-    if custom_annotated_images_output_dir is None:
-        # Default behavior: create a directory based on input_path name
-        base_name = os.path.basename(os.path.normpath(input_path))
-        # Remove extension if present (e.g., for video files or single image processing)
-        name_part, _ = os.path.splitext(base_name)
-        derived_output_dir_name = f"{name_part}_processed"
-        # Place it under runs/detect/ similar to default Ultralytics behavior for 'predict' runs
-        final_annotated_images_output_dir = os.path.join("runs", "detect", derived_output_dir_name)
-    else:
-        # User provided a specific path
-        final_annotated_images_output_dir = custom_annotated_images_output_dir
-
-    if not os.path.exists(final_annotated_images_output_dir):
-        os.makedirs(final_annotated_images_output_dir, exist_ok=True)
-
-    print(f"Processing images from: {input_path} using {model_path_or_name}")
-    print(f"Custom annotated images will be saved to: {final_annotated_images_output_dir}")
-
-    predict_args = {
-        "source": input_path, "stream": True, "verbose": False,
-        "conf": conf_thresh, "iou": iou_thresh, "imgsz": img_size, "augment": use_tta,
-        "max_det": max_det, "half": use_half, "classes": classes_to_detect,
-        "device": device, "batch": batch_size,
-        "save_txt": save_txt, "save_conf": save_conf, "save_crop": save_crop,
-        "save": False # We are handling saving of annotated images manually
+    image_data_to_write = {
+        "fileName": payload['filename'],
+        "image_uid": str(uuid.uuid4()),
+        "dimensions": {"width": img_w, "height": img_h},
+        "prelabels": prelabels_list
     }
+    
+    return json.dumps(image_data_to_write) + '\n'
 
-    loop_start_time = time.perf_counter()
+def process_single_directory(
+        input_path,           
+        model_path,
+        output_dir,          
+        annotated_output_base_dir=None,
+        line_thickness=None,  
+        font_size=None,       
+        conf_thresh=0.25,
+        batch_size=8,
+        img_size=1280):
+    
+    # --- Input Validation ---
+    print(f"Step 1: Validating input directory: {input_path}")
+    if not os.path.isdir(input_path):
+        print(f"Error: Input path '{input_path}' is not a valid directory. Skipping.")
+        return
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"Error: Model file not found at '{model_path}'.")
+    print("Validation successful.")
 
-    # Ensure the directory for the output TXT file exists
-    output_txt_dir = os.path.dirname(output_txt_path)
-    if output_txt_dir and not os.path.exists(output_txt_dir): # Check if output_txt_dir is not empty string
-        os.makedirs(output_txt_dir, exist_ok=True)
+    # --- Setup Model and Output Paths ---
+    print("\nStep 2: Initializing model and preparing output paths...")
+    try:
+        model = ultralytics.YOLO(model_path)
+        print(f"Successfully loaded model from '{model_path}'.")
+    except Exception as e:
+        print(f"Error loading YOLO model: {e}")
+        return
 
-    with open(output_txt_path, 'w') as outfile: # Open the .txt file for writing
+    # --- Automatic Filename and Directory Generation ---
+    # Get the base name of the input folder (e.g., "dynamicpt2")
+    folder_name = os.path.basename(os.path.normpath(input_path))
+    
+    # Create the full path for the output JSONL file
+    os.makedirs(output_dir, exist_ok=True)
+    final_output_path = os.path.join(output_dir, f"{folder_name}.jsonl")
+    print(f"Output JSONL file will be saved to: {final_output_path}")
 
-        results_generator = model.predict(**predict_args)
-        processed_count = 0
+    # Create a specific subdirectory for annotated images for this run
+    specific_annotated_dir = None
+    if annotated_output_base_dir:
+        specific_annotated_dir = os.path.join(annotated_output_base_dir, folder_name)
+        os.makedirs(specific_annotated_dir, exist_ok=True)
+        print(f"Annotated images will be saved to: '{specific_annotated_dir}'")
+    
+    # --- Parallel Processing ---
+    print("\nStep 3: Starting parallel image processing...")
+    start_time = time.perf_counter()
+    
+    mp_context = mp.get_context("spawn")
+    
+    with ProcessPoolExecutor(mp_context=mp_context) as executor, open(final_output_path, 'w') as outfile:
+        futures = []
+        
+        results_generator = model.predict(
+            source=input_path, stream=True, conf=conf_thresh,
+            batch=batch_size, imgsz=img_size, verbose=False
+        )
+        
+        # Use a temporary list to show a proper progress bar for inference
+        results_list = list(tqdm(results_generator, desc=f"Inferring on {folder_name}"))
+        total_image_count = len(results_list)
 
-        for result in results_generator:
-            processed_count += 1
+        for result in results_list:
+            if specific_annotated_dir:
+                plot_kwargs = {}
+                if line_thickness is not None:
+                    plot_kwargs['line_width'] = line_thickness
+                if font_size is not None:
+                    plot_kwargs['font_size'] = font_size
+                annotated_image = result.plot(**plot_kwargs)
+                image_filename = os.path.basename(result.path)
+                output_image_path = os.path.join(specific_annotated_dir, image_filename)
+                cv2.imwrite(output_image_path, annotated_image)
+            
+            payload_boxes = []
+            if result.boxes:
+                coords_list = result.boxes.xyxy.cpu().tolist()
+                conf_list = result.boxes.conf.cpu().tolist()
+                cls_list = result.boxes.cls.cpu().tolist()
 
-            if processed_count % 10 == 0:
-                current_time = time.perf_counter()
-                elapsed_time = current_time - loop_start_time
-                avg_time_so_far = elapsed_time / processed_count if processed_count > 0 else 0
-                print(f"Processed {processed_count} images... (Avg time per image so far: {avg_time_so_far:.3f}s)")
+                for i in range(len(coords_list)):
+                    payload_boxes.append({
+                        "coords": coords_list[i],
+                        "confidence": conf_list[i],
+                        "name": model.names[int(cls_list[i])]
+                    })
 
-            current_image_path = result.path
-            file_name = os.path.basename(current_image_path) if current_image_path else f"image_{processed_count}.jpg"
-            file_id = str(uuid.uuid4()) # Unique ID for the image processing instance
-
-            plot_kwargs = {}
-            if custom_line_width is not None:
-                plot_kwargs['line_width'] = custom_line_width
-            if custom_font_size is not None:
-                plot_kwargs['font_size'] = custom_font_size
-
-            annotated_image_bgr = result.plot(**plot_kwargs)
-            output_image_file_path = os.path.join(final_annotated_images_output_dir, file_name)
-            cv2.imwrite(output_image_file_path, annotated_image_bgr)
-
-            prelabels_list = []
-            if result.boxes: # Check if any detections (boxes) exist for this image
-                for box in result.boxes: # Iterate over each detected box
-                    class_id = int(box.cls.item()) # Get class ID
-                    class_name = model.names[class_id] # Get human-readable class name
-                    detection_uid = str(uuid.uuid4()) # Unique ID for this specific detection
-
-                    coords = box.xyxy[0].tolist()
-                    xmin, ymin, xmax, ymax = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
-
-                    points = [
-                        {"x": xmin, "y": ymin}, {"x": xmax, "y": ymin},
-                        {"x": xmax, "y": ymax}, {"x": xmin, "y": ymax}
-                    ]
-
-                    prelabel_entry = {
-                        "name": class_name, "uid": detection_uid,
-                        "type": "rect", "select": {}, "points": points
-                    }
-                    prelabels_list.append(prelabel_entry)
-
-            image_data_to_write = {
-                "fileName": file_name,
-                "fileId": file_id,
-                "prelabels": prelabels_list
+            payload = {
+                "filename": os.path.basename(result.path),
+                "img_h": result.orig_shape[0],
+                "img_w": result.orig_shape[1],
+                "boxes": payload_boxes,
             }
-            outfile.write(json.dumps(image_data_to_write) + '\n')
 
-    duration = time.perf_counter() - loop_start_time
+            future = executor.submit(format_data_for_jsonl, payload)
+            futures.append(future)
 
-    if processed_count > 0:
-        avg_time = duration / processed_count
-        fps = 1.0 / avg_time if avg_time > 0 else 0
-        print(f"Finished. Processed {processed_count} images in {duration:.2f}s.")
-        print(f"  Average YOLO processing time per image: {avg_time:.3f}s ({fps:.2f} FPS).")
-        print(f"Custom detections TXT file saved to: {output_txt_path}")
+        print("\nInference complete. Formatting and writing to file...")
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Writing JSONL"):
+            json_line = future.result()
+            outfile.write(json_line)
+            
+    # --- Final Report for this Directory ---
+    duration = time.perf_counter() - start_time
+    print("\n--- Directory Processing Complete ---")
+    if total_image_count > 0:
+        fps = total_image_count / duration if duration > 0 else 0
+        print(f"✓ Processed {total_image_count} images in {duration:.2f} seconds ({fps:.2f} FPS).")
+        print(f"✓ Results saved to: {final_output_path}")
+        if specific_annotated_dir:
+            print(f"✓ Annotated images saved to: {specific_annotated_dir}")
     else:
-        print(f"No images were processed from '{input_path}'.")
+        print("✗ No images were found or processed.")
+
 
 if __name__ == '__main__':
-    overall_start_time = time.perf_counter()
+    # --- USER CONFIGURATION ---
+    INPUT_FOLDERS = [
+        "/home/ryan/Desktop/pt2",
+        "/home/ryan/Desktop/part1",
+        "/home/ryan/Desktop/dynamic2dtest-50-0617" # You can add more folders here
+    ]
+    MODEL_FILE = "bettershuffled.pt"
+    
+    # --- Set the main output directories ---
+    # JSONL files will be created inside this folder
+    JSONL_OUTPUT_DIRECTORY = "jsonl_outputs"
+    # Annotated images will be saved in subfolders inside this one
+    ANNOTATED_OUTPUT_DIRECTORY = "annotated_results"
 
-    run_yolo_on_images(
-        #Edit below
-        model_path_or_name="yolo12x", # As per original, ensure this model exists or is downloadable
-        input_path="20250604-2Ddynamic-test-160", # This will be used for <input_folder_name>_processed
-        img_size=(2176,1440),
-        custom_line_width=2,
-        custom_font_size=1.5, # Ultralytics plot() font_size is a relative factor
-        batch_size=3,
-        conf_thresh=0.35,      #confidence threshold
-        iou_thresh=0.7,        #Intersection over Union threshold
-        use_tta=True, # Use Test-Time Augmentation
-        max_det=300, # Maximum number of detections per image
-        use_half=True, # Use FP16 precision (ensure GPU support)
-        classes_to_detect=[0, 1, 2, 3, 5, 7], # Specify class IDs to detect, None for all
-        device=None, # None for auto-detection (CPU or GPU)
-        save_txt=False,
-        save_conf=False,
-        save_crop=False
-        
-    )
+    # --- Annotation Appearance ---
+    ANNOTATION_LINE_THICKNESS = 1  
+    ANNOTATION_FONT_SIZE = 0.5     
 
-    overall_duration = time.perf_counter() - overall_start_time
-    print(f"Total script execution completed in {overall_duration:.2f} seconds.")
+    # --- Main Execution Loop ---
+    for folder_path in INPUT_FOLDERS:
+        print(f"\n============================================================")
+        print(f"          STARTING PROCESSING FOR: {folder_path}          ")
+        print(f"============================================================\n")
+        try:
+            process_single_directory(
+                input_path=folder_path,
+                model_path=MODEL_FILE,
+                output_dir=JSONL_OUTPUT_DIRECTORY,
+                annotated_output_base_dir=None,
+                line_thickness=ANNOTATION_LINE_THICKNESS, 
+                font_size=ANNOTATION_FONT_SIZE,           
+                conf_thresh=0.4,
+                batch_size=10, 
+                img_size=1280
+            )
+        except (FileNotFoundError, IsADirectoryError, TypeError, Exception) as e:
+            print(f"\nAn error occurred while processing '{folder_path}': {e}")
+            print("Moving to the next folder.")
+
+    print("\n\n--- All specified directories have been processed. ---")
