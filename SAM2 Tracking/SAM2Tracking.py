@@ -57,8 +57,7 @@ def create_video_from_frames(image_folder, video_path, fps):
 # --- End of Helper Functions ---
 
 
-def initialize_tracks(predictor, inference_state, objects_initial, mask_threshold):
-    # This function remains mostly the same, but now it returns the full result dict for frame 0
+def initialise_tracks(predictor, inference_state, objects_initial, mask_threshold):
     script_id_map = {}
     frame_0_results = {"visuals": [], "prelabels": []}
     
@@ -101,9 +100,8 @@ def save_output_worker(args_tuple):
         annotated_dir = os.path.join(args.output_dir, "annotated_frames")
         original_frame_np = np.array(Image.open(current_img_path).convert("RGB"))
         annotated_frame = draw_visualizations(original_frame_np, visuals_data)
-        jpeg_quality = [int(cv2.IMWRITE_JPEG_QUALITY), 85]
         output_path = os.path.join(annotated_dir, os.path.basename(current_img_path))
-        cv2.imwrite(output_path, cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR), jpeg_quality)
+        cv2.imwrite(output_path, cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
     if worker_payload["prelabels"]:
         return json.dumps({"fileName": os.path.basename(image_files[frame_idx]), "prelabels": worker_payload["prelabels"]})
     return None
@@ -128,9 +126,7 @@ def propagate_and_save_streamed(predictor, inference_state, image_files, script_
                 worker_payload["visuals"] = frame_0_results["visuals"]
             task_args = (0, worker_payload, image_files, args)
             futures.append(executor.submit(save_output_worker, task_args))
-        
-        print(f"\nInitialized {len(script_id_map)} objects. Starting propagation and saving stream...")
-        
+            
         # --- Main Inference and Saving Loop (Frames 1+) ---
         # The main process will focus on inference, while worker processes handle saving in the background.
         for frame_idx, pred_obj_ids, frame_masks_all in predictor.propagate_in_video(inference_state, start_frame_idx=1):
@@ -194,7 +190,7 @@ def main():
     parser.add_argument("--model_config_yaml", type=str, required=True, help="Path to the SAM2 model configuration YAML file.")
     parser.add_argument("--local_checkpoint_path", type=str, required=True, help="Path to the local SAM2 model checkpoint (.pt file).")
     parser.add_argument("--output_dir", type=str, default="sam2_output", help="Directory to save the output files.")
-    parser.add_argument("--mask_threshold", type=float, default=0.0, help="Threshold for converting mask probabilities to binary masks.")
+    parser.add_argument("--mask_threshold", type=float, default=0, help="Threshold for converting mask probabilities to binary masks.")
     parser.add_argument("--make_video", action='store_true', help="If set, create an MP4 video from the annotated frames.")
     parser.add_argument("--video_fps", type=float, default=10.0, help="Frames per second for the output video.")
     parser.add_argument("--no_save_annotated_frames", action='store_true', help="If set, do not save annotated frame images to disk. This significantly speeds up processing if only JSONL output is needed.")
@@ -213,12 +209,10 @@ def main():
     autocast_context = torch.autocast("cuda", dtype=torch.bfloat16) if use_bfloat16 else torch.autocast("cuda")
 
     if torch.cuda.is_available() and torch.cuda.get_device_properties(0).major >= 8:
-        print("Enabling TF32 for Ampere and newer GPUs.")
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    print("Initializing SAM2VideoPredictor...")
-    predictor = build_sam2_video_predictor(args.model_config_yaml, args.local_checkpoint_path, device=device, apply_postprocessing=True)
+    predictor = build_sam2_video_predictor(args.model_config_yaml, args.local_checkpoint_path, device=device, apply_postprocessing=True,)
     predictor.eval()
 
     inference_state = None
@@ -226,18 +220,18 @@ def main():
     try:
         with autocast_context:
             image_files = get_sorted_image_files(args.image_dir)
-            print("Initializing inference state with async loader...")
+            print("Initialising inference state with async loader...")
             inference_state = predictor.init_state(video_path=args.image_dir, async_loading_frames=True)
             
             with open(args.json_annotation, 'r') as f:
                 objects_initial = json.load(f).get("annotation", {}).get("object", [])
 
-            script_id_map, frame_0_results = initialize_tracks(
+            script_id_map, frame_0_results = initialise_tracks(
                 predictor, inference_state, objects_initial, args.mask_threshold
             )
             
             if not script_id_map:
-                print("\nNo objects initialized. Exiting.")
+                print("\nNo objects initialised. Exiting.")
                 return
 
             propagate_and_save_streamed(predictor, inference_state, image_files, script_id_map, frame_0_results, args)
