@@ -7,7 +7,7 @@ A high-performance Python script for running batch object detection using Ultral
 ## Core Features
 
 -   **Batch Processing**: Efficiently processes multiple directories of images.
--   **Custom Class Remapping**: Maps original model class IDs to new, user-defined labels in both data and visual outputs.
+-   **Optional Class Remapping**: Toggle a custom class name schema on or off. Defaults to using the model's original names.
 -   **Parallelized I/O**: Uses `ProcessPoolExecutor` to format and write results without blocking the main inference loop.
 -   **Structured Outputs**: Generates organized JSONL data files and optional annotated images.
 -   **Performance Metrics**: Reports processing speed in Frames Per Second (FPS).
@@ -20,7 +20,7 @@ pip install ultralytics opencv-python tqdm
 
 ## Configuration and Usage
 
-1.  **Configure Parameters**: All primary settings are located in the `if __name__ == '__main__':` block. Adjust paths, model settings, and output directories as needed.
+1.  **Configure Parameters**: All primary settings are located in the `if __name__ == '__main__':` block. Adjust paths, model settings, and output directories. The new `REMAP_CLASSES` flag controls the name remapping feature.
 
     ```python
     # --- USER CONFIGURATION ---
@@ -28,6 +28,10 @@ pip install ultralytics opencv-python tqdm
     MODEL_FILE = "yolov8l.pt"
     TEXT_OUTPUT_DIRECTORY = "text_outputs"
     ANNOTATED_OUTPUT_DIRECTORY = "annotated_images" # Set to None to disable
+
+    # --- CLASS REMAPPING CONTROL ---
+    # Set to True to enable custom remapping, False to use original model names.
+    REMAP_CLASSES = False # Default is OFF
 
     # --- INFERENCE PARAMETERS ---
     ANNOTATION_LINE_THICKNESS = 1
@@ -38,11 +42,12 @@ pip install ultralytics opencv-python tqdm
     CLASSES_TO_DETECT = [0, 1, 2, 3, 5, 7] # Set to None for all classes
     ```
 
-2.  **Define Class Mapping**: The class remapping logic is defined within the `process_single_directory` function. Modify the `class_mapping` dictionary to fit your schema.
+2.  **Define Custom Mapping (Optional)**: If you set `REMAP_CLASSES = True`, modify the `class_mapping` dictionary within the `process_single_directory` function to define your custom schema. Otherwise, this step can be ignored.
 
     ```python
+    # If remapping is enabled, define the new names here.
     # Keys are original class IDs, values are the new desired names.
-    class_mapping = {
+    names_to_use = {
         0: 'static_object', 1: 'static_object', 2: 'static_object',
         3: 'static_object', 4: 'car', 5: 'truck', 6: 'pedestrian',
         7: 'two_wheeler'
@@ -65,14 +70,9 @@ A `.txt` file is generated for each input directory, containing one JSON object 
 ```json
 {"fileName": "image_01.jpg", "fileId": "a1b2c3d4-e5f6-a1b2-c3d4-e5f6a1b2c3d4", "prelabels": [{"name": "car", "uid": "f1e2d3c4-b5a6-f1e2-d3c4-b5a6f1e2d3c4", "type": "rect", "points": [{"x": 747.0, "y": 471.0}, {"x": 1133.0, "y": 471.0}, {"x": 1133.0, "y": 709.0}, {"x": 747.0, "y": 709.0}], "select": {}}]}
 ```
--   **`fileName`**: Original image filename.
--   **`fileId`**: Unique UUID for the processed image.
--   **`prelabels`**: List of detection objects.
-    -   **`name`**: The remapped class name.
-    -   **`uid`**: A unique UUID for the detection.
-    -   **`type`**: Annotation shape (`rect`).
-    -   **`points`**: Four corner points of the bounding box.
+-   **`name`**: The class name (remapped or original, based on the `REMAP_CLASSES` setting).
+-   **`fileId`**, **`fileName`**, **`uid`**, **`type`**, **`points`**: Standard fields as described previously.
 
 ### 2. Annotated Images
 
-If enabled, annotated images are saved to a corresponding subdirectory, preserving the input folder structure. Bounding boxes and labels reflect the custom `class_mapping`.
+If enabled, annotated images are saved to a corresponding subdirectory. Bounding boxes and labels will reflect the chosen name schema (custom or original).
