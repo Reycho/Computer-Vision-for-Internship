@@ -1,56 +1,78 @@
-# Yolo12 Based Detector
+# YOLO Batch Inference with Class Remapping
 
-A simple script utilising ultralytics frameowrk to detect and export detected data.
+A high-performance Python script for running batch object detection using Ultralytics YOLO models. It is optimized for processing large image datasets and includes a key feature for remapping model output classes to a custom schema.
 
-The script is flexible with options ranging from model selection and image size to performance optimizations like half-precision and Test-Time Augmentation (TTA).
-
-# Demo
 ![Example Output](20250401104225.046401_RearCam01.jpeg)
 
-## Requirements
+## Core Features
 
-To run this script, you will need Python 3.8+ and the following libraries.
+-   **Batch Processing**: Efficiently processes multiple directories of images.
+-   **Custom Class Remapping**: Maps original model class IDs to new, user-defined labels in both data and visual outputs.
+-   **Parallelized I/O**: Uses `ProcessPoolExecutor` to format and write results without blocking the main inference loop.
+-   **Structured Outputs**: Generates organized JSONL data files and optional annotated images.
+-   **Performance Metrics**: Reports processing speed in Frames Per Second (FPS).
 
--   `ultralytics`
--   `opencv-python`
--   `torch`
--   `torchvision`
+## Installation
 
-For GPU acceleration, ensure you have a compatible NVIDIA GPU with CUDA and cuDNN installed. The `ultralytics` package will often handle the correct PyTorch installation.
-
-You can install all required packages using pip:
 ```bash
-pip install ultralytics opencv-python
+pip install ultralytics opencv-python tqdm
 ```
 
-## Usage
+## Configuration and Usage
 
-1.  Clone this repository or download the `run_yolo.py` script (assuming you name your file that).
-2.  Place your images in a directory (e.g., `path/to/your/images`).
-3.  Place your YOLO model file (e.g., `yolo12x.pt`) where the script can access it, or use an official model name which will be downloaded automatically.
-4.  Configure the parameters directly within the `if __name__ == '__main__':` block at the bottom of the script.
+1.  **Configure Parameters**: All primary settings are located in the `if __name__ == '__main__':` block. Adjust paths, model settings, and output directories as needed.
 
+    ```python
+    # --- USER CONFIGURATION ---
+    INPUT_FOLDERS = ["/path/to/images_part1", "/path/to/images_part2"]
+    MODEL_FILE = "yolov8l.pt"
+    TEXT_OUTPUT_DIRECTORY = "text_outputs"
+    ANNOTATED_OUTPUT_DIRECTORY = "annotated_images" # Set to None to disable
+
+    # --- INFERENCE PARAMETERS ---
+    ANNOTATION_LINE_THICKNESS = 1
+    ANNOTATION_FONT_SIZE = 0.5
+    CONFIDENCE_THRESHOLD = 0.4
+    BATCH_SIZE = 10
+    IMAGE_SIZE = 1280
+    CLASSES_TO_DETECT = [0, 1, 2, 3, 5, 7] # Set to None for all classes
+    ```
+
+2.  **Define Class Mapping**: The class remapping logic is defined within the `process_single_directory` function. Modify the `class_mapping` dictionary to fit your schema.
+
+    ```python
+    # Keys are original class IDs, values are the new desired names.
+    class_mapping = {
+        0: 'static_object', 1: 'static_object', 2: 'static_object',
+        3: 'static_object', 4: 'car', 5: 'truck', 6: 'pedestrian',
+        7: 'two_wheeler'
+    }
+    ```
+
+3.  **Execute**: Run the script from the terminal.
+
+    ```bash
+    python your_script_name.py
+    ```
 
 ## Output Format
 
-The script produces two primary outputs:
+### 1. JSONL Data File (`.txt`)
 
-### 1. Annotated Images
-
-Annotated images are saved in the directory specified by `custom_annotated_images_output_dir`. Each image will have bounding boxes, class names, and confidence scores drawn on it.
-
-### 2. Detections TXT File
-
-A text file (specified by `output_txt_path`) is created, containing one JSON object per line for each processed image. This format is useful for easy parsing and integration with other tools.
+A `.txt` file is generated for each input directory, containing one JSON object per line.
 
 **Example JSON Line:**
 ```json
-{"fileName": "image_01.jpg", "fileId": "a1b2c3d4-e5f6-a1b2-c3d4-e5f6a1b2c3d4", "prelabels": [{"name": "car", "uid": "f1e2d3c4-b5a6-f1e2-d3c4-b5a6f1e2d3c4", "type": "rect", "select": {}, "points": [{"x": 747.0, "y": 471.0}, {"x": 1133.0, "y": 471.0}, {"x": 1133.0, "y": 709.0}, {"x": 747.0, "y": 709.0}]}, {"name": "person", "uid": "9a8b7c6d-5e4f-9a8b-7c6d-5e4f9a8b7c6d", "type": "rect", "select": {}, "points": [{"x": 415.0, "y": 520.0}, {"x": 510.0, "y": 520.0}, {"x": 510.0, "y": 815.0}, {"x": 415.0, "y": 815.0}]}]}
+{"fileName": "image_01.jpg", "fileId": "a1b2c3d4-e5f6-a1b2-c3d4-e5f6a1b2c3d4", "prelabels": [{"name": "car", "uid": "f1e2d3c4-b5a6-f1e2-d3c4-b5a6f1e2d3c4", "type": "rect", "points": [{"x": 747.0, "y": 471.0}, {"x": 1133.0, "y": 471.0}, {"x": 1133.0, "y": 709.0}, {"x": 747.0, "y": 709.0}], "select": {}}]}
 ```
--   `fileName`: The original basename of the image file.
--   `fileId`: A unique UUID generated for this processing instance of the image.
--   `prelabels`: A list of all detections found in the image.
-    -   `name`: The human-readable class name.
-    -   `uid`: A unique UUID for this specific detection.
-    -   `type`: The shape of the annotation (always `rect` in this script).
-    -   `points`: A list of the four corner points of the bounding box, starting from the top-left and moving clockwise (based on image coordinates `[xmin, ymin, xmax, ymax]`).
+-   **`fileName`**: Original image filename.
+-   **`fileId`**: Unique UUID for the processed image.
+-   **`prelabels`**: List of detection objects.
+    -   **`name`**: The remapped class name.
+    -   **`uid`**: A unique UUID for the detection.
+    -   **`type`**: Annotation shape (`rect`).
+    -   **`points`**: Four corner points of the bounding box.
+
+### 2. Annotated Images
+
+If enabled, annotated images are saved to a corresponding subdirectory, preserving the input folder structure. Bounding boxes and labels reflect the custom `class_mapping`.
