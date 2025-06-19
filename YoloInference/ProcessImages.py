@@ -43,6 +43,7 @@ def process_single_directory(
         input_path,
         model_path,
         output_dir,
+        remap_classes=False,  # --- NEW: Optional parameter for remapping ---
         annotated_output_base_dir=None,
         line_thickness=None,  
         font_size=None,       
@@ -69,10 +70,17 @@ def process_single_directory(
         print(f"Error loading YOLO model: {e}")
         return
 
-    # ---FIX: This is the custom mapping we will use AFTER prediction.---
-    class_mapping = {0: 'static_object', 1: 'static_object', 2: 'static_object', 3: 'static_object', 4: 'car', 5: 'truck', 6: 'pedestrian', 7: 'two_wheeler'}
-    # The original loop to modify model.names is removed as it's ineffective.
-
+    # --- Conditional Class Name Setup ---
+    # This section determines whether to use original model names or a custom mapping.
+    if remap_classes:
+        print("Class remapping is ENABLED.")
+        # Define the custom mapping here. Keys are original class IDs, values are new names.
+        names_to_use = {0: 'static_object', 1: 'static_object', 2: 'static_object', 3: 'static_object', 4: 'car', 5: 'truck', 6: 'pedestrian', 7: 'two_wheeler'}
+    else:
+        print("Class remapping is DISABLED. Using original model class names.")
+        # Use the model's default names dictionary.
+        names_to_use = model.names
+    
     # --- Automatic Filename and Directory Generation ---
     folder_name = os.path.basename(os.path.normpath(input_path))
     os.makedirs(output_dir, exist_ok=True)
@@ -111,8 +119,9 @@ def process_single_directory(
                 if font_size is not None:
                     plot_kwargs['font_size'] = font_size
                 
-                # --- FIX: Pass the custom class_mapping to plot() to get correct labels on images ---
-                annotated_image = result.plot(names=class_mapping, **plot_kwargs)
+                # --- MODIFIED: Use the 'names_to_use' variable for plotting ---
+                # This works whether it's a custom mapping or the model's original names.
+                annotated_image = result.plot(names=names_to_use, **plot_kwargs)
                 
                 image_filename = os.path.basename(result.path)
                 output_image_path = os.path.join(specific_annotated_dir, image_filename)
@@ -126,14 +135,13 @@ def process_single_directory(
 
                 for i in range(len(coords_list)):
                     class_id = int(cls_list[i])
-                    # --- FIX: Look up the new name from our mapping dictionary ---
-                    # Use .get() for safety, falling back to original name if ID is not in our map.
-                    new_name = class_mapping.get(class_id, model.names[class_id])
+                    
+                    new_name = names_to_use.get(class_id, f"unknown_class_{class_id}")
                     
                     payload_boxes.append({
                         "coords": coords_list[i],
                         "confidence": conf_list[i],
-                        "name": new_name  # Use the newly mapped name
+                        "name": new_name
                     })
 
             payload = {
@@ -178,6 +186,11 @@ if __name__ == '__main__':
     # To disable annotated output, set ANNOTATED_OUTPUT_DIRECTORY = None
     ANNOTATED_OUTPUT_DIRECTORY = None
     
+    # --- Class Remapping Control ---
+    # Set to True to enable custom class remapping defined in process_single_directory.
+    # Set to False to use the model's original class names.
+    REMAP_CLASSES = False  # Default is OFF
+    
     # --- Annotation Appearance ---
     ANNOTATION_LINE_THICKNESS = 1  
     ANNOTATION_FONT_SIZE = 0.5     
@@ -192,6 +205,7 @@ if __name__ == '__main__':
                 input_path=folder_path,
                 model_path=MODEL_FILE,
                 output_dir=TEXT_OUTPUT_DIRECTORY,
+                remap_classes=REMAP_CLASSES, # Pass the remapping flag
                 annotated_output_base_dir=ANNOTATED_OUTPUT_DIRECTORY,
                 line_thickness=ANNOTATION_LINE_THICKNESS, 
                 font_size=ANNOTATION_FONT_SIZE,           
