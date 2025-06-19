@@ -51,7 +51,7 @@ python SAM2Tracking.py \
 ```
 
 **Note**:
-Toggle to False if your input directory is short/you have large amounts of vram (12GB+) for a speedup
+Inside sam2_video_predictor.py toggle to True if your input directory if you get CUDA out of memory errors.
 
 ```python     
     offload_video_to_cpu=True,
