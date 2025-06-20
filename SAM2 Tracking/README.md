@@ -78,13 +78,6 @@ $ CC="cc -mavx2" pip install -U --force-reinstall pillow-simd
 -   `--video_fps`: Framerate for the output video. (Default: `10.0`)
 -   `--no_save_annotated_frames`: A flag to disable saving annotated frame images. This significantly speeds up processing and reduces disk usage if you only need the `tracked_detections.jsonl` data file.
 
-## Key Features
-
--   **Efficient Streaming Architecture**: Overlaps inference and saving operations using a process pool to maximize throughput and keep RAM usage low, even on very long videos.
--   **Asynchronous Frame Loading**: Pre-fetches image frames from disk to prevent I/O bottlenecks and keep the GPU saturated.
--   **Optimized Performance**: Automatically enables TF32 and BFloat16 on compatible hardware for faster computations.
--   **Robust Frame Handling**: Correctly sorts input image files numerically, preventing issues with standard alphabetical sorting (e.g., `10.png` coming before `2.png`).
-
 ## Input & Output
 
 -   **Input JSON:** A single JSON object describing objects in the first frame, similar to LabelMe or Pascal VOC format. It must contain an `annotation` key with an `object` list. Each object in the list needs a `name` and a `bndbox` dictionary (`xmin`, `ymin`, `xmax`, `ymax`).
