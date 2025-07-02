@@ -19,7 +19,25 @@ pip install ultralytics sahi opencv-python tqdm pyav
 
 ## Scripts and Configuration
 
-All scripts are configured by editing the parameters directly within the `if __name__ == '__main__':` block at the bottom of each file.
+All scripts are configured by editing the parameters directly within the file, usually at the top or within the `if __name__ == '__main__':` block.
+
+### Inference Pipelines
+
+| Script | Description | Purpose |
+| :--- | :--- | :--- |
+| **`ProcessImages.py`** | Primary tool for high-performance batch inference on image directories. | Processes multiple folders, remaps classes, and generates annotated images and JSONL data. |
+| **`sahiprocess.py`** | Inference using Slicing Aided Hyper Inference (SAHI). | Improves detection of small objects by processing images in overlapping tiles. |
+| **`processvideoblur.py`** | Highly optimized, multi-process pipeline for video processing. | Detects and blurs faces in a video file using hardware-acceleration and a shared memory architecture for maximum speed. |
+
+### Dataset Utilities
+
+| Script | Description | Purpose |
+| :--- | :--- | :--- |
+| **`convert.py`** | Converts complex, multi-format JSON annotations into the standard YOLO `.txt` label format. | **Essential for training.** Pre-processes raw annotation data, handles multiple JSON schemas, and dynamically creates a class map. |
+| **`shuffle.py`** | Splits a folder of images and their corresponding labels into `train` and `val` sets. | Creates the standard YOLO dataset structure required by the training framework. |
+| **`findmore.py`** | Scans a directory of JSON annotations to discover and count all nested subcategories. | A data analysis tool to understand class distribution before training. |
+
+---
 
 ### `ProcessImages.py`
 The primary tool for high-performance batch inference on directories of images. It processes multiple folders, generates annotated images, and outputs JSONL data files.
@@ -84,6 +102,20 @@ CONF_THRESHOLD = 0.2
 # ...
 ```
 
+### `convert.py`
+A powerful, two-pass script for converting complex JSON annotations into the simple `.txt` format required for YOLO training. It is specifically designed to handle multiple, inconsistent JSON schemas and intelligently filter for relevant classes based on an instance count threshold.
+
+**Configuration:**
+```python
+# --- CONFIGURATION ---
+# 1. Define the input and output folders.
+SOURCE_JSON_DIR = '/home/ryan/yolov12/MIND_FLOW'
+OUTPUT_LABELS_DIR = '/home/ryan/yolov12/templabels'
+
+# 2. Set the minimum number of instances for a subcategory to be included.
+INSTANCE_COUNT_THRESHOLD = 2000
+```
+
 ### `shuffle.py`
 A dataset utility to split a large, unorganized dataset of images and their corresponding labels into the standard `train` and `val` sets required for YOLO training.
 
@@ -106,20 +138,3 @@ if __name__ == "__main__":
     json_directory = '/home/ryan/Downloads/.../MIND_FLOW'
     # ...
 ```
----
-## Output Format
-
-The inference scripts (**`ProcessImages.py`**, **`sahiprocess.py`**) produce two main types of output:
-
-#### 1. JSONL Data File (`.txt`)
-
-A `.txt` file is generated for each input directory, where each line is a self-contained JSON object representing one image's annotations.
-
-**Example Line:**
-```json
-{"fileName": "image_01.jpg", "fileId": "a1b2c3d4-...", "prelabels": [{"name": "car", "uid": "f1e2d3c4-...", "type": "rect", "points": [{"x": 747.0, "y": 471.0}, ...], "select": {}}]}
-```
-
-#### 2. Annotated Images
-
-If an `ANNOTATED_OUTPUT_DIRECTORY` is specified, the scripts will save a copy of each processed image with bounding boxes and class labels drawn on them. These are saved to a subdirectory named after the input folder.
