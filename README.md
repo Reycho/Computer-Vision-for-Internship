@@ -1,11 +1,3 @@
-Excellent. Now that the sub-folders are well-documented, the main `README.md` can be transformed into a clean, professional, and useful "table of contents" for the entire repository.
-
-Based on the structure and purpose of your project, here is a suggested `README.md` for the root directory. It's concise, directs users to the right place, and sets expectations about the hardware requirements, just as you noted.
-
-You can copy and paste this directly into your main `README.md`.
-
----
-
 # Computer Vision Scripts
 
 This repository is a collection of high-performance Python scripts developed during a computer vision internship. The projects focus on two primary areas: object tracking in video and end-to-end YOLO pipelines for object detection.
