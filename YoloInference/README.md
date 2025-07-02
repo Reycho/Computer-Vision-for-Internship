@@ -1,78 +1,125 @@
-# YOLO Batch Inference with Class Remapping
+# YOLO Inference and Dataset Utilities
 
-A high-performance Python script for running batch object detection using Ultralytics YOLO models. It is optimized for processing large image datasets and includes a key feature for remapping model output classes to a custom schema.
+This directory contains a collection of Python scripts for dataset preparation and high-performance batch inference using Ultralytics YOLO models. The scripts are optimized for processing large datasets and video files efficiently.
 
 ![Example Output](20250401104225.046401_RearCam01.jpeg)
 
-## Core Features
-
--   **Batch Processing**: Efficiently processes multiple directories of images.
--   **Optional Class Remapping**: Toggle a custom class name schema on or off. Defaults to using the model's original names.
--   **Parallelized I/O**: Uses `ProcessPoolExecutor` to format and write results without blocking the main inference loop.
--   **Structured Outputs**: Generates organized JSONL data files and optional annotated images.
--   **Performance Metrics**: Reports processing speed in Frames Per Second (FPS).
-
 ## Installation
 
+The primary dependencies for these scripts can be installed via pip. It is recommended to use a virtual environment.
+
 ```bash
-pip install ultralytics opencv-python tqdm
+pip install ultralytics sahi opencv-python tqdm pyav
+```
+- **`ultralytics`**: The core YOLO framework.
+- **`sahi`**: For Slicing Aided Hyper Inference, used in **`sahiprocess.py`**.
+- **`pyav`**: Required for hardware-accelerated video processing in **`processvideoblur.py`**.
+
+---
+
+## Scripts and Configuration
+
+All scripts are configured by editing the parameters directly within the `if __name__ == '__main__':` block at the bottom of each file.
+
+### `ProcessImages.py`
+The primary tool for high-performance batch inference on directories of images. It processes multiple folders, generates annotated images, and outputs JSONL data files.
+
+**Configuration:**
+```python
+if __name__ == '__main__':
+    # --- USER CONFIGURATION ---
+    INPUT_FOLDERS = [
+        "/home/ryan/yolov12/dynamic2dtest-100-0617-p1",
+        "/home/ryan/yolov12/dynamic2dtest-100-0617-p2"
+    ]
+    MODEL_FILE = "bettershuffled.pt"
+    
+    TEXT_OUTPUT_DIRECTORY = "text_outputs"
+    ANNOTATED_OUTPUT_DIRECTORY = None # Set to a path to enable, or None to disable
+    
+    # --- Class Remapping Control ---
+    REMAP_CLASSES = False
+    
+    # --- Annotation Appearance & Inference Parameters ---
+    # ...
 ```
 
-## Configuration and Usage
+### `sahiprocess.py`
+Performs inference using Slicing Aided Hyper Inference (SAHI), which is ideal for improving the detection of small objects by processing images in overlapping tiles.
 
-1.  **Configure Parameters**: All primary settings are located in the `if __name__ == '__main__':` block. Adjust paths, model settings, and output directories. The new `REMAP_CLASSES` flag controls the name remapping feature.
+**Configuration:**
+```python
+if __name__ == '__main__':
+    INPUT_SOURCES = [
+        "/home/ryan/yolov12/dynamic2dtest-50-0617",
+        # ... more paths
+    ]
+    MODEL_FILE = "/home/ryan/yolov12/staticobjectX.pt"
+    
+    TEXT_OUTPUT_DIRECTORY = "/home/ryan/Desktop/Tobecombined/static_sahi_jsonl"
+    ANNOTATED_OUTPUT_DIRECTORY = "/home/ryan/Desktop/Tobecombined/sahi_runs"
+    
+    # --- SAHI Parameters ---
+    CONFIDENCE_THRESHOLD = 0.2
+    SLICE_HEIGHT = 1280
+    SLICE_WIDTH = 1280
+    # ...
+```
 
-    ```python
-    # --- USER CONFIGURATION ---
-    INPUT_FOLDERS = ["/path/to/images_part1", "/path/to/images_part2"]
-    MODEL_FILE = "yolov8l.pt"
-    TEXT_OUTPUT_DIRECTORY = "text_outputs"
-    ANNOTATED_OUTPUT_DIRECTORY = "annotated_images" # Set to None to disable
+### `processvideoblur.py`
+A highly optimized, multi-process pipeline to detect and blur faces in a video file. It is designed for maximum throughput on high-end hardware.
 
-    # --- CLASS REMAPPING CONTROL ---
-    # Set to True to enable custom remapping, False to use original model names.
-    REMAP_CLASSES = False # Default is OFF
+**Note:** This script uses an advanced multi-process architecture with shared memory and hardware-accelerated video codecs (`h264_cuvid`, `h264_nvenc`) for performance.
 
-    # --- INFERENCE PARAMETERS ---
-    ANNOTATION_LINE_THICKNESS = 1
-    ANNOTATION_FONT_SIZE = 0.5
-    CONFIDENCE_THRESHOLD = 0.4
-    BATCH_SIZE = 10
-    IMAGE_SIZE = 1280
-    CLASSES_TO_DETECT = [0, 1, 2, 3, 5, 7] # Set to None for all classes
-    ```
+**Configuration:**
+```python
+# --- Configuration & Hyperparameters ---
+INPUT_VIDEO_PATH = Path("/home/ryan/yolov12/D2-P3-pm-2-uno-2.mp4")
+OUTPUT_VIDEO_PATH = Path("video_blurred.mp4")
+MODEL_PATH = Path("/home/ryan/yolov12/facedetection.pt")
 
-2.  **Define Custom Mapping (Optional)**: If you set `REMAP_CLASSES = True`, modify the `class_mapping` dictionary within the `process_single_directory` function to define your custom schema. Otherwise, this step can be ignored.
+# --- Pipeline Tuning ---
+MAX_BATCH_SIZE = 100
+CONF_THRESHOLD = 0.2
+# ...
+```
 
-    ```python
-    # If remapping is enabled, define the new names here.
-    # Keys are original class IDs, values are the new desired names.
-    names_to_use = {
-        0: 'static_object', 1: 'static_object', 2: 'static_object',
-        3: 'static_object', 4: 'car', 5: 'truck', 6: 'pedestrian',
-        7: 'two_wheeler'
-    }
-    ```
+### `shuffle.py`
+A dataset utility to split a large, unorganized dataset of images and their corresponding labels into the standard `train` and `val` sets required for YOLO training.
 
-3.  **Execute**: Run the script from the terminal.
+**Configuration:**
+```python
+# --- CONFIGURATION: USER ACTION REQUIRED ---
+SOURCE_IMAGES_DIR = "/home/ryan/yolov12/.../images"
+SOURCE_LABELS_DIR = "/home/ryan/yolov12/.../output"
+OUTPUT_DIR = "/home/ryan/yolov12/DATASETFINALVER"
+VALIDATION_SPLIT_RATIO = 0.2
+```
 
-    ```bash
-    python your_script_name.py
-    ```
+### `findmore.py`
+A data analysis tool that scans a directory of JSON annotations to discover and count all nested subcategories. This is useful for understanding your dataset's class distribution before training.
 
+**Configuration:**
+```python
+if __name__ == "__main__":
+    # Point this to the directory with ALL your JSON files.
+    json_directory = '/home/ryan/Downloads/.../MIND_FLOW'
+    # ...
+```
+---
 ## Output Format
 
-### 1. JSONL Data File (`.txt`)
+The inference scripts (**`ProcessImages.py`**, **`sahiprocess.py`**) produce two main types of output:
 
-A `.txt` file is generated for each input directory, containing one JSON object per line.
+#### 1. JSONL Data File (`.txt`)
 
-**Example JSON Line:**
+A `.txt` file is generated for each input directory, where each line is a self-contained JSON object representing one image's annotations.
+
+**Example Line:**
 ```json
-{"fileName": "image_01.jpg", "fileId": "a1b2c3d4-e5f6-a1b2-c3d4-e5f6a1b2c3d4", "prelabels": [{"name": "car", "uid": "f1e2d3c4-b5a6-f1e2-d3c4-b5a6f1e2d3c4", "type": "rect", "points": [{"x": 747.0, "y": 471.0}, {"x": 1133.0, "y": 471.0}, {"x": 1133.0, "y": 709.0}, {"x": 747.0, "y": 709.0}], "select": {}}]}
+{"fileName": "image_01.jpg", "fileId": "a1b2c3d4-...", "prelabels": [{"name": "car", "uid": "f1e2d3c4-...", "type": "rect", "points": [{"x": 747.0, "y": 471.0}, ...], "select": {}}]}
 ```
--   **`name`**: The class name (remapped or original, based on the `REMAP_CLASSES` setting).
--   **`fileId`**, **`fileName`**, **`uid`**, **`type`**, **`points`**: Standard fields as described previously.
 
-### 2. Annotated Images
+#### 2. Annotated Images
 
-If enabled, annotated images are saved to a corresponding subdirectory. Bounding boxes and labels will reflect the chosen name schema (custom or original).
+If an `ANNOTATED_OUTPUT_DIRECTORY` is specified, the scripts will save a copy of each processed image with bounding boxes and class labels drawn on them. These are saved to a subdirectory named after the input folder.
