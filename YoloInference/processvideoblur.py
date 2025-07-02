@@ -16,33 +16,19 @@ from typing import List
 # =================================================================================
 # --- Configuration & Hyperparameters ---
 # =================================================================================
-INPUT_VIDEO_PATH = Path("/home/ryan/yolov12/D2-P3-pm-2-uno-2.mp4")
-OUTPUT_VIDEO_PATH = Path("video_blurred.mp4")
-MODEL_PATH = Path("/home/ryan/yolov12/facedetection.pt")
+INPUT_VIDEO_PATH = Path("/home/ryan/yolov12/cars.mp4")
+OUTPUT_VIDEO_PATH = Path("carsblurred.mp4")
+MODEL_PATH = Path("/home/ryan/yolov12/yolo11x.pt")
 
 # --- Video Codec Configuration ---
-# Use NVIDIA's CUVID for hardware-accelerated decoding
 HW_DECODER_CODEC = 'h264_cuvid'
-
-# NEW: Configuration for the writer for smaller file sizes
-# Use NVIDIA's NVENC for hardware-accelerated H.264 encoding
 HW_ENCODER_CODEC = 'h264_nvenc'
-# Best fallback: High-quality CPU-based H.264 encoder
 CPU_ENCODER_CODEC = 'libx264'
-# Encoder options for GPU. 'preset' affects speed/compression. 'cq' controls quality.
-# Lower 'cq' = higher quality, larger file. Good range: 23-28.
-ENCODER_OPTIONS = {
-    'preset': 'slow',
-    'cq': '24'
-}
-# Fallback options for CPU. 'crf' is the CPU equivalent of 'cq'.
-CPU_ENCODER_OPTIONS = {
-    'preset': 'slow',
-    'crf': '23'
-}
+ENCODER_OPTIONS = {'preset': 'slow', 'cq': '24'}
+CPU_ENCODER_OPTIONS = {'preset': 'slow', 'crf': '23'}
 
 # --- Pipeline Tuning ---
-MAX_BATCH_SIZE = 100
+MAX_BATCH_SIZE = 25
 BATCH_COLLECTION_TIMEOUT = 0.01
 RAW_SHM_POOL_SIZE = 600
 PROCESSED_SHM_POOL_SIZE = 600
@@ -57,7 +43,6 @@ def cleanup_shm(signum=None, frame=None):
     """Gracefully cleans up shared memory blocks on exit or interrupt."""
     print("\nCaught signal, cleaning up all shared memory...")
     cleaned_count = 0
-    # Use a copy of the list to avoid issues if it's modified elsewhere
     for name in list(g_all_shm_names):
         try:
             shm = shared_memory.SharedMemory(name=name)
@@ -107,17 +92,15 @@ def writer_process_wrapper(cores, *args):
 def _pyav_reader_logic(hw_decoder_codec, video_path, frame_shape, frame_dtype, free_raw_shm_queue, ready_raw_shm_queue):
     """Reads frames, attempting HW acceleration with robust fallback."""
     container = None
-    using_hw_accel = True
     try:
         print(f"[Reader] Attempting HW-accelerated decoding with '{hw_decoder_codec}'...")
         container = av.open(str(video_path), options={'video_codec': hw_decoder_codec})
-        if hw_decoder_codec in container.streams.video[0].codec.name:
-            print(f"[Reader] Success! Using GPU for video decoding.")
-            using_hw_accel = True
-        else:
-            print(f"[Reader] HW codec '{hw_decoder_codec}' requested but not used. Re-opening with CPU.")
+        if hw_decoder_codec not in container.streams.video[0].codec.name:
+            print(f"[Reader] HW codec requested but not used. Re-opening with CPU.")
             container.close()
             container = av.open(str(video_path))
+        else:
+            print(f"[Reader] Success! Using GPU for video decoding.")
     except Exception as e:
         print(f"[Reader] HW-acceleration failed: {e}. Falling back to CPU decoding.")
         if container: container.close()
@@ -125,9 +108,7 @@ def _pyav_reader_logic(hw_decoder_codec, video_path, frame_shape, frame_dtype, f
 
     try:
         stream = container.streams.video[0]
-        if not using_hw_accel:
-            stream.thread_type = "AUTO"
-            print(f"[Reader] CPU fallback is active. Using up to {stream.codec_context.thread_count} threads for decoding.")
+        stream.thread_type = "AUTO"
         
         total_frames = stream.frames if stream.frames > 0 else int(stream.duration * stream.average_rate)
         with tqdm(total=total_frames, desc="[Reader]", position=1, leave=False, dynamic_ncols=True) as pbar:
@@ -144,88 +125,56 @@ def _pyav_reader_logic(hw_decoder_codec, video_path, frame_shape, frame_dtype, f
         ready_raw_shm_queue.put(None)
         if container: container.close()
 
-import numpy as np
-import cv2
-from multiprocessing import shared_memory
-
-# This function would be in your main script
 def _blur_worker_logic(results_queue, processed_shm_queue, free_raw_shm_queue, free_processed_shm_queue, frame_shape, frame_dtype):
     """
-    Applies blur to faces based on tracking results from YOLO.
-    This version is designed to work with the output of `model.track()`.
+    Applies blur to faces based on detection results from YOLO.
+    This version is designed to work with the output of `model.predict()`.
     """
     while True:
-        # Get the next task from the GPU process.
-        # The data format is now (frame_index, shm_name, tracked_boxes_object)
         data = results_queue.get()
         if data is None:
-            break  # Sentinel value received, exit the loop.
+            break
 
-        index, raw_shm_name, tracked_boxes = data
-        processed_shm_name = None  # Ensure it's defined in case of early errors
+        index, raw_shm_name, detected_boxes = data
+        processed_shm_name = None
 
         try:
-            # 1. Acquire a free shared memory block for the processed (blurred) frame.
             processed_shm_name = free_processed_shm_queue.get()
-
-            # 2. Attach to both the input (raw) and output (processed) shared memory blocks.
             raw_shm = shared_memory.SharedMemory(name=raw_shm_name)
             processed_shm = shared_memory.SharedMemory(name=processed_shm_name)
 
-            # 3. Create NumPy array "views" into the shared memory. This is a zero-copy operation.
             frame_in = np.ndarray(frame_shape, dtype=frame_dtype, buffer=raw_shm.buf)
             frame_out = np.ndarray(frame_shape, dtype=frame_dtype, buffer=processed_shm.buf)
             
-            # 4. Start by copying the original frame to the output buffer.
-            # We will apply the blur directly to this `frame_out` buffer.
             np.copyto(frame_out, frame_in)
 
-            # 5. --- CORE LOGIC CHANGE ---
-            # Check if the tracker returned any valid tracks for this frame.
-            # The `tracked_boxes.id` attribute will not be None if tracks exist.
-            if tracked_boxes.id is not None:
-                # Loop through each box that is part of a confirmed track.
-                for box in tracked_boxes:
-                    # Get the coordinates from the box object.
-                    x1, y1, x2, y2 = np.array(box.xyxy[0].cpu(), dtype=int)
-                    
-                    # Optional: get the track ID for debugging or advanced logic
-                    # track_id = int(box.id[0].cpu())
-                    # print(f"Frame {index}: Blurring face with Track ID {track_id}")
-
-                    # Ensure coordinates are within the frame boundaries to prevent errors.
+            # --- MODIFIED: CORRECTED LOGIC FOR EXTRACTING COORDINATES ---
+            if len(detected_boxes) > 0:
+                # Get all coordinates as a single NumPy array from the .xyxy attribute
+                all_coords = detected_boxes.xyxy.cpu().numpy().astype(int)
+                
+                # Iterate through each row of coordinates [x1, y1, x2, y2]
+                for x1, y1, x2, y2 in all_coords:
+                    # Ensure coordinates are within the frame boundaries
                     x1, y1, x2, y2 = max(0, x1), max(0, y1), min(frame_shape[1], x2), min(frame_shape[0], y2)
                     
-                    # Select the region of interest (the face) from the output frame.
                     roi = frame_out[y1:y2, x1:x2]
 
-                    # Apply blur only if the region is valid (has a size greater than 0).
                     if roi.size > 0:
-                        # Dynamically calculate a suitable kernel size for the Gaussian blur.
-                        # This makes the blur look good on both small and large faces.
                         k_size = max(5, int(min(roi.shape[0], roi.shape[1]) * 0.5))
-                        # The kernel size must be an odd number.
                         k_size = k_size if k_size % 2 != 0 else k_size + 1
-                        
-                        # Apply the blur in-place to the region of interest in the output frame.
                         frame_out[y1:y2, x1:x2] = cv2.GaussianBlur(roi, (k_size, k_size), 30)
             
-            # 6. Send the processed frame to the writer process.
             processed_shm_queue.put((index, processed_shm_name))
 
-            # 7. Detach from the shared memory blocks.
             raw_shm.close()
             processed_shm.close()
             
-            # 8. CRITICAL: Return the raw memory block to the pool for the Reader to reuse.
             free_raw_shm_queue.put(raw_shm_name)
 
         except Exception as e:
-            # Robust error handling: ensure memory blocks are returned to the pools.
             print(f"[Blur Worker] Error on frame {index}: {e}")
-            # Return the raw buffer so it's not lost.
             free_raw_shm_queue.put(raw_shm_name)
-            # If we acquired a processed buffer before the error, return it too.
             if processed_shm_name:
                 free_processed_shm_queue.put(processed_shm_name)
 
@@ -249,7 +198,7 @@ def _pyav_writer_logic(output_path, properties, processed_shm_queue, free_proces
             
             stream.width = w
             stream.height = h
-            stream.pix_fmt = 'yuv420p'  # Crucial for compatibility
+            stream.pix_fmt = 'yuv420p'
 
             with tqdm(total=total_frames, desc="[Writer]", position=2, leave=False, dynamic_ncols=True) as pbar:
                 while next_frame_to_write < total_frames:
@@ -277,12 +226,10 @@ def _pyav_writer_logic(output_path, properties, processed_shm_queue, free_proces
                         print("\n[Writer] Timed out waiting for frames. Pipeline may be stalled.")
                         break
                 
-                # Flush any remaining frames in the encoder
                 for packet in stream.encode():
                     container.mux(packet)
     except Exception as e:
         print(f"[Writer] FATAL ERROR during video writing: {e}")
-
 
 # =================================================================================
 # --- Main Execution Block ---
@@ -308,17 +255,13 @@ if __name__ == '__main__':
         raise SystemExit(f"FATAL: Could not analyze video: {e}")
 
     if total_cores < 6:
-        print(f"Warning: Only {total_cores} cores. Using simpler allocation.")
-        reader_cores = [0]
-        main_cores = [1] if total_cores > 1 else [0]
+        reader_cores, main_cores = [0], [1] if total_cores > 1 else [0]
         writer_cores = [2] if total_cores > 2 else main_cores
         all_worker_cores = list(range(3, total_cores)) if total_cores > 3 else writer_cores
         NUM_WORKERS = len(all_worker_cores) if all_worker_cores else 1
     else:
-        print("Using 'Balanced I/O' CPU core allocation.")
         reader_cores, writer_cores, main_cores = [0, 1], [2, 3], [4]
-        all_worker_cores = list(range(5, total_cores))
-        if not all_worker_cores: all_worker_cores = [total_cores - 1]
+        all_worker_cores = list(range(5, total_cores)) or [total_cores - 1]
         NUM_WORKERS = len(all_worker_cores)
     
     print("-" * 50)
@@ -328,16 +271,14 @@ if __name__ == '__main__':
     def create_shm_pool(pool_size, prefix):
         pool, q = [], mp.Queue()
         for i in range(pool_size):
-            name = f'yolo_shm_{prefix}_{i}_{os.getpid()}' # Add PID to name for uniqueness
+            name = f'yolo_shm_{prefix}_{i}_{os.getpid()}'
             try:
                 shm = shared_memory.SharedMemory(name=name, create=True, size=frame_size_bytes)
                 pool.append(shm)
                 g_all_shm_names.append(name)
                 q.put(name)
             except FileExistsError:
-                # If a previous unclean exit left shm, unlink and recreate
-                try:
-                    shared_memory.SharedMemory(name=name).unlink()
+                try: shared_memory.SharedMemory(name=name).unlink()
                 except FileNotFoundError: pass
                 shm = shared_memory.SharedMemory(name=name, create=True, size=frame_size_bytes)
                 pool.append(shm)
@@ -351,13 +292,8 @@ if __name__ == '__main__':
     results_queue = mp.Queue(maxsize=QUEUE_SIZE)
     processed_shm_queue = mp.Queue(maxsize=QUEUE_SIZE)
 
-    reader_args = (HW_DECODER_CODEC, INPUT_VIDEO_PATH, frame_shape, frame_dtype, free_raw_shm_queue, ready_raw_shm_queue)
-    reader = mp.Process(target=reader_process_wrapper, args=(reader_cores, *reader_args), name="Reader")
-    
-    writer_props = (w, h, fps)
-    writer_args = (OUTPUT_VIDEO_PATH, writer_props, processed_shm_queue, free_processed_shm_queue, total_frames, frame_shape, frame_dtype)
-    writer = mp.Process(target=writer_process_wrapper, args=(writer_cores, *writer_args), name="Writer")
-    
+    reader = mp.Process(target=reader_process_wrapper, args=(reader_cores, HW_DECODER_CODEC, INPUT_VIDEO_PATH, frame_shape, frame_dtype, free_raw_shm_queue, ready_raw_shm_queue), name="Reader")
+    writer = mp.Process(target=writer_process_wrapper, args=(writer_cores, OUTPUT_VIDEO_PATH, (w, h, fps), processed_shm_queue, free_processed_shm_queue, total_frames, frame_shape, frame_dtype), name="Writer")
     blur_workers = [mp.Process(target=blur_worker_process_wrapper, args=([all_worker_cores[i % len(all_worker_cores)]], results_queue, processed_shm_queue, free_raw_shm_queue, free_processed_shm_queue, frame_shape, frame_dtype), name=f"BlurWorker-{i}") for i in range(NUM_WORKERS)]
     
     processes = [reader, writer] + blur_workers
@@ -376,14 +312,11 @@ if __name__ == '__main__':
                 while len(batch_data) < MAX_BATCH_SIZE and (time.monotonic() - start_time) < BATCH_COLLECTION_TIMEOUT:
                     data = ready_raw_shm_queue.get(timeout=0.001)
                     if data is None:
-                        main_loop_active = False
-                        break
+                        main_loop_active = False; break
                     batch_data.append(data)
             except queue.Empty:
-                if not main_loop_active and not batch_data:
-                    break
+                if not main_loop_active and not batch_data: break
             
-            if not batch_data and not main_loop_active: break
             if not batch_data: continue
 
             batch_indices, batch_shm_names, batch_frames_views = [], [], []
@@ -396,13 +329,7 @@ if __name__ == '__main__':
             
             if not batch_frames_views: continue
             
-            results_batch = model.track(
-                batch_frames_views,
-                conf=CONF_THRESHOLD,    # Initial detection confidence
-                persist=True,           # Crucial: tells the tracker to remember tracks between batches
-                tracker="bytetrack.yaml", # Specify the tracker configuration
-                verbose=False
-            )
+            results_batch = model.predict(batch_frames_views, conf=CONF_THRESHOLD, verbose=False)
             
             for i, results in enumerate(results_batch):
                 results_queue.put((batch_indices[i], batch_shm_names[i], results.boxes))
@@ -412,22 +339,15 @@ if __name__ == '__main__':
         pbar_gpu.close()
         print("\n[Main] All frames processed by GPU. Waiting for child processes to finish...")
         
-        # Close all opened shm views in the main process
-        for shm in shm_map.values():
-            shm.close()
-
-        for _ in range(NUM_WORKERS):
-            results_queue.put(None)
+        for shm in shm_map.values(): shm.close()
+        for _ in range(NUM_WORKERS): results_queue.put(None)
         
-        # Wait for processes to finish gracefully
         reader.join(timeout=30)
-        for p in blur_workers:
-            p.join(timeout=30)
+        for p in blur_workers: p.join(timeout=30)
         
         processed_shm_queue.put(None)
         writer.join(timeout=120)
 
-        # Check if processes are still alive and terminate if needed
         for p in processes:
             if p.is_alive():
                 print(f"Warning: Process {p.name} did not exit gracefully. Terminating.")
